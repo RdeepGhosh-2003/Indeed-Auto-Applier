@@ -223,7 +223,7 @@
 
     // 2. Check for "Apply on company site"
     const companySiteSelector = scope.querySelector(
-      'a[aria-label*="Apply on company site"], a[aria-label*="Apply on employer site"], a[id="applyButtonLinkContainer"]'
+      'a[aria-label*="Apply on company site" i], a[aria-label*="Apply on employer site" i], #applyButtonLinkContainer a, a[id="applyButtonLinkContainer"], [data-testid="apply-button"] a'
     );
 
     if (companySiteSelector) {
@@ -241,7 +241,7 @@
     });
 
     if (companyByText) {
-      const url = companyByText.href || companyByText.getAttribute('href') || window.location.href;
+      const url = companyByText.closest('a')?.href || companyByText.querySelector('a')?.href || companyByText.href || companyByText.getAttribute('href') || window.location.href;
       return { type: 'company_site', element: companyByText, url };
     }
 
@@ -463,12 +463,26 @@
     const jobUrl = window.location.href;
 
     log(`🔍 Inspecting: "${jobTitle}" at "${company}" (${location})`, 'info');
-    // 0. Blacklist / Negative Keywords Check
+    // 0. Blacklist / Negative Keywords Check (Word-boundary matching prevents false positives like "internet" or "internal")
     const blacklistStr = settings?.blacklistKeywords || 'intern, unpaid, bpo, telecaller, faculty, teaching, night shift';
     const blacklistTokens = blacklistStr.toLowerCase().split(/[,|]/).map(t => t.trim()).filter(t => t.length > 1);
     const fullTextLower = `${jobTitle} \n ${description}`.toLowerCase();
 
-    const matchedBlacklist = blacklistTokens.find(token => token && fullTextLower.includes(token));
+    function escapeRegex(str) {
+      return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    const matchedBlacklist = blacklistTokens.find(token => {
+      if (!token) return false;
+      let regex;
+      if (token === 'intern') {
+        regex = /\b(?:intern|interns|internship|internships)\b/i;
+      } else {
+        regex = new RegExp(`\\b${escapeRegex(token)}\\b`, 'i');
+      }
+      return regex.test(fullTextLower);
+    });
+
     if (matchedBlacklist) {
       log(`⏭️ Skipped: "${jobTitle}" matches blacklist keyword "${matchedBlacklist}".`, 'info');
       chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1 } }).catch(() => {});
