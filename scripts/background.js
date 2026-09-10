@@ -90,14 +90,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     notificationTabMap.set(notifId, { tabId, windowId });
 
     if (chrome.notifications) {
-      chrome.notifications.create(notifId, {
-        type: 'basic',
-        iconUrl: 'icons/icon48.png',
-        title: '⚠️ CAPTCHA Verification Required!',
-        message: 'Indeed application requires CAPTCHA verification. Click here to solve it.',
-        priority: 2,
-        requireInteraction: true
-      });
+      try {
+        chrome.notifications.create(notifId, {
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('icons/icon48.png'),
+          title: '⚠️ CAPTCHA Verification Required!',
+          message: 'Indeed application requires CAPTCHA verification. Click here to solve it.',
+          priority: 2,
+          requireInteraction: true
+        }, () => {
+          if (chrome.runtime.lastError) {
+            console.warn('[Background] Notification error:', chrome.runtime.lastError.message);
+          }
+        });
+      } catch (err) {
+        console.warn('[Background] Notification exception:', err);
+      }
     }
     appendSessionLog('⚠️ CAPTCHA detected! Waiting for manual verification...', 'warning');
     sendResponse({ status: 'notified' });
@@ -255,13 +263,21 @@ async function handleSessionCompleted(summary = {}) {
   await appendSessionLog(msg, 'success');
 
   if (chrome.notifications) {
-    chrome.notifications.create({
-      type: 'basic',
-      iconUrl: 'icons/icon48.png',
-      title: '🎯 Indeed Auto-Applier Finished!',
-      message: msg,
-      priority: 1
-    });
+    try {
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('icons/icon48.png'),
+        title: '🎯 Indeed Auto-Applier Finished!',
+        message: msg,
+        priority: 1
+      }, () => {
+        if (chrome.runtime.lastError) {
+          console.warn('[Background] Notification error:', chrome.runtime.lastError.message);
+        }
+      });
+    } catch (err) {
+      console.warn('[Background] Notification exception:', err);
+    }
   }
 }
 
