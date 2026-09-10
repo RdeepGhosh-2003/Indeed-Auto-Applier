@@ -236,7 +236,8 @@
       const aria = (el.getAttribute('aria-label') || '').toLowerCase().replace(/\s+/g, ' ').trim();
       return txt.includes('apply on company site') || aria.includes('apply on company site') ||
              txt.includes('apply on employer site') || aria.includes('apply on employer site') ||
-             txt.includes('apply on company website');
+             txt.includes('apply on company website') ||
+             txt.includes('continue to application') || aria.includes('continue to application');
     });
 
     if (companyByText) {
@@ -247,17 +248,37 @@
     return { type: 'unknown', element: null };
   }
 
-  // Wait for right-side job description to load
-  async function waitForJobDetails(maxWaitMs = 3500) {
+  // Wait for right-side job description to load for the specific clicked card
+  async function waitForJobDetails(card, maxWaitMs = 3500) {
+    const cardTitle = (card?.querySelector('h2.jobTitle, .jobTitle, a.jcs-JobTitle')?.textContent || '').trim().toLowerCase();
+    const cardJk = card?.getAttribute('data-jk') || card?.querySelector('[data-jk]')?.getAttribute('data-jk') || null;
     const start = Date.now();
+
+    // Give Indeed's React SPA a moment to initiate the fetch/render
+    await sleep(400);
+
     while (Date.now() - start < maxWaitMs) {
+      const viewPane = document.querySelector('#jobsearch-ViewjobPaneWrapper, .jobsearch-JobComponent, div[data-testid="jobsearch-ViewjobPaneWrapper"]');
       const desc = document.querySelector('#jobDescriptionText, .jobsearch-jobDescriptionText, [data-testid="jobDescriptionText"]');
+
       if (desc && desc.textContent.trim().length > 30) {
-        return desc;
+        if (viewPane && cardJk) {
+          const paneJk = viewPane.querySelector(`[data-jk="${cardJk}"]`) || document.querySelector(`[data-jk="${cardJk}"]`);
+          if (paneJk) return desc;
+        }
+        if (cardTitle && viewPane) {
+          const paneTitle = (viewPane.querySelector('h2[data-testid="simpler-jobTitle"], .jobsearch-JobInfoHeader-title, h1.jobTitle, h2.jobTitle')?.textContent || '').trim().toLowerCase();
+          if (paneTitle && (paneTitle.includes(cardTitle.slice(0, 15)) || cardTitle.includes(paneTitle.slice(0, 15)))) {
+            return desc;
+          }
+        }
+        if (Date.now() - start > 800) {
+          return desc;
+        }
       }
-      await sleep(250);
+      await sleep(200);
     }
-    return document.querySelector('#jobDescriptionText, .jobsearch-jobDescriptionText');
+    return document.querySelector('#jobDescriptionText, .jobsearch-jobDescriptionText, [data-testid="jobDescriptionText"]');
   }
 
   // Execute Indeed Apply wizard flow
@@ -409,15 +430,15 @@
     triggerClick(clickable);
 
     // Wait for details pane to load
-    const descEl = await waitForJobDetails(3500);
+    const descEl = await waitForJobDetails(card, 3500);
 
-    const viewPane = document.querySelector('#jobsearch-ViewjobPaneWrapper, .jobsearch-JobComponent, div[data-testid="jobsearch-ViewjobPaneWrapper"]');
+    const viewPane = document.querySelector('#jobsearch-ViewjobPaneWrapper, .jobsearch-JobComponent, div[data-testid="jobsearch-ViewjobPaneWrapper"], #vjs-container');
     const scope = viewPane || document;
 
-    const titleEl = scope.querySelector('h2[data-testid="simpler-jobTitle"], .jobsearch-JobInfoHeader-title, h1.jobTitle, h2.jobTitle') || card.querySelector('h2.jobTitle, .jobTitle');
-    const companyEl = scope.querySelector('div[data-testid="inlineHeader-companyName"], [data-company-name="true"], .companyName') || card.querySelector('.companyName');
-    const locationEl = scope.querySelector('div[data-testid="inlineHeader-companyLocation"], .companyLocation') || card.querySelector('.companyLocation');
-    const salaryEl = scope.querySelector('div[data-testid="attribute_snippet_testid"], #salaryInfoAndJobType, .salary-snippet-container') || card.querySelector('.salary-snippet-container, [data-testid="attribute_snippet_testid"]');
+    const titleEl = scope.querySelector('h2[data-testid="simpler-jobTitle"], .jobsearch-JobInfoHeader-title, h1.jobTitle, h2.jobTitle, [data-testid="jobsearch-JobInfoHeader-title"]') || card.querySelector('h2.jobTitle, .jobTitle, a.jcs-JobTitle');
+    const companyEl = scope.querySelector('div[data-testid="inlineHeader-companyName"], [data-company-name="true"], [data-testid="company-name"], .companyName') || card.querySelector('[data-testid="company-name"], span[data-testid="company-name"], .companyName');
+    const locationEl = scope.querySelector('div[data-testid="inlineHeader-companyLocation"], [data-testid="text-location"], .companyLocation') || card.querySelector('[data-testid="text-location"], div[data-testid="text-location"], .companyLocation');
+    const salaryEl = scope.querySelector('div[data-testid="attribute_snippet_testid"], div[data-testid="job-salary-snippet"], #salaryInfoAndJobType, .salary-snippet-container, [data-testid*="salary" i]') || card.querySelector('.salary-snippet-container, [data-testid="attribute_snippet_testid"], [data-testid="job-salary-snippet"], [data-testid*="salary" i]');
 
     const jobTitle = titleEl ? titleEl.textContent.trim() : 'Unknown Role';
     const company = companyEl ? companyEl.textContent.trim() : 'Unknown Company';
@@ -569,8 +590,17 @@
     );
 
     if (nextBtn) {
+      if (nextBtn.disabled || nextBtn.getAttribute('aria-disabled') === 'true' || nextBtn.classList.contains('disabled')) {
+        log('Reached the last page of job results.', 'info');
+        return false;
+      }
+
       log('Navigating to next page of results...', 'info');
-      triggerClick(nextBtn);
+      if (nextBtn.tagName === 'A' && nextBtn.href && !nextBtn.href.startsWith('javascript:')) {
+        window.location.href = nextBtn.href;
+      } else {
+        triggerClick(nextBtn);
+      }
       await sleep(4000);
       return true;
     }
@@ -604,9 +634,26 @@
           break;
         }
 
-        const cards = Array.from(document.querySelectorAll(
-          'div.job_seen_beacon, div[data-testid="slider_item"], td.resultContent, li:has([data-jk]), div[data-jk]'
+        const rawCards = Array.from(document.querySelectorAll(
+          'div.job_seen_beacon, div.cardOutline, div[data-testid="slider_item"], td.resultContent, li:has([data-jk]), div[data-jk]'
         )).filter(c => c.offsetWidth > 0 && c.offsetHeight > 0);
+
+        // Deduplicate cards by job key so nested elements do not cause redundant processing
+        const seenJksThisLoop = new Set();
+        const cards = [];
+        for (const c of rawCards) {
+          const jk = c.getAttribute('data-jk') || c.querySelector('[data-jk]')?.getAttribute('data-jk') ||
+                     c.querySelector('a[id^="job_"]')?.id?.replace('job_', '') ||
+                     c.querySelector('a[data-jk]')?.getAttribute('data-jk') || null;
+          if (jk) {
+            if (!seenJksThisLoop.has(jk)) {
+              seenJksThisLoop.add(jk);
+              cards.push(c);
+            }
+          } else {
+            cards.push(c);
+          }
+        }
 
         if (cards.length === 0) {
           log('No job cards found on page. Waiting for page load...', 'warning');
