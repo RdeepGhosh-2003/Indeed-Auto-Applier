@@ -427,6 +427,10 @@
   // Cross-frame runtime message listener
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'IA_FILL_AND_ADVANCE') {
+      // Top window already tried locally; only subframes (application iframes) should handle this message!
+      if (window === window.top) {
+        return false;
+      }
       handleStepFillAndAdvance(request.profile, request.settings)
         .then(res => sendResponse(res))
         .catch(err => sendResponse({ handled: false, error: err.message }));
@@ -451,8 +455,18 @@
   });
 
   function closeModal() {
-    const closeBtn = document.querySelector('[aria-label="Close"], [data-testid="ia-close-button"], button.ia-CloseButton, div[role="dialog"] button[aria-label*="close"]');
-    if (closeBtn) closeBtn.click();
+    const closeBtn = document.querySelector(
+      'button[aria-label*="close" i], button[data-testid*="close" i], button.ia-CloseButton, [data-testid="ia-close-button"], [data-testid="modal-close-button"], div[role="dialog"] button[aria-label*="close" i], button[id="close-button"]'
+    );
+    if (closeBtn) {
+      try {
+        closeBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        closeBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+        closeBtn.click();
+      } catch (_) {
+        closeBtn.click();
+      }
+    }
   }
 
   // Setup autonomous MutationObserver to fill forms even if opened in iframe / separate flow

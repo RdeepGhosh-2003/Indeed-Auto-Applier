@@ -104,13 +104,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === 'CHECK_CRAWLER_TAB') {
+    chrome.storage.local.get(['autoApplySession'], (data) => {
+      const session = data?.autoApplySession;
+      const isAllowed = !!(session?.isRunning && sender.tab && session.tabId === sender.tab.id);
+      sendResponse({ isAllowed, tabId: sender.tab?.id, sessionTabId: session?.tabId });
+    });
+    return true;
+  }
+
   if (request.action === 'FORWARD_TO_ACTIVE_TAB' && request.message) {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (!tabs || tabs.length === 0) {
-        sendResponse({ handled: false, reason: 'no_active_tab' });
+    chrome.storage.local.get(['autoApplySession'], (data) => {
+      const targetTabId = sender?.tab?.id || data?.autoApplySession?.tabId;
+      if (!targetTabId) {
+        sendResponse({ handled: false, reason: 'no_target_tab' });
         return;
       }
-      chrome.tabs.sendMessage(tabs[0].id, request.message, (resp) => {
+      chrome.tabs.sendMessage(targetTabId, request.message, (resp) => {
         if (chrome.runtime.lastError) {
           sendResponse({ handled: false, error: chrome.runtime.lastError.message });
         } else {
@@ -127,8 +137,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ status: 'ignored' });
       return true;
     }
-    handleSessionCompleted(request.summary);
-    sendResponse({ status: 'ok' });
+    chrome.storage.local.get(['autoApplySession'], (data) => {
+      if (sender?.tab?.id && data?.autoApplySession?.tabId && sender.tab.id !== data.autoApplySession.tabId) {
+        console.warn('[Background] Ignored SESSION_COMPLETED from non-session tab:', sender.tab.id);
+        sendResponse({ status: 'ignored' });
+        return;
+      }
+      handleSessionCompleted(request.summary);
+      sendResponse({ status: 'ok' });
+    });
     return true;
   }
 });

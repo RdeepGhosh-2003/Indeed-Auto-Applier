@@ -281,14 +281,14 @@
     return document.querySelector('#jobDescriptionText, .jobsearch-jobDescriptionText, [data-testid="jobDescriptionText"]');
   }
 
-  // Execute Indeed Apply wizard flow
-    // Execute Indeed Apply wizard flow with cross-frame coordination
+  // Execute Indeed Apply wizard flow with cross-frame coordination
   async function executeIndeedApplication(profile, settings) {
     log('Waiting for application wizard modal/frame to load...', 'info');
     await sleep(2500);
 
     const maxSteps = 12;
     let stepCount = 0;
+    let consecutiveStuckSteps = 0;
 
     while (stepCount < maxSteps) {
       if (isHalted) return { success: false, reason: 'halted' };
@@ -326,13 +326,12 @@
               window.IndeedAutoFormFiller.closeModal();
               return { success: true };
             }
+            handled = true;
           } else if (advRes?.action === 'advanced') {
             log('Advanced to next step...', 'info');
             await sleep(2000);
-          } else {
-            await sleep(1500);
+            handled = true;
           }
-          handled = true;
         }
       } catch (localErr) {
         console.warn('[Auto-Applier] Local wizard step error:', localErr);
@@ -353,16 +352,17 @@
           });
 
           if (response && response.handled) {
-            handled = true;
             if (response.action === 'submitted') {
               log('🎉 Application submitted in application frame!', 'success');
               return { success: true };
             } else if (response.action === 'captcha_detected') {
               log('⚠️ CAPTCHA detected in application frame! Pausing...', 'warning');
               await sleep(5000);
+              handled = true;
             } else if (response.action === 'advanced') {
               log(`Step ${stepCount}: Auto-filled ${response.filled || 0} fields & advanced in application frame.`, 'info');
               await sleep(2000);
+              handled = true;
             }
           }
         } catch (frameErr) {
@@ -390,7 +390,18 @@
         return { success: true };
       }
 
-      if (!handled) {
+      if (handled) {
+        consecutiveStuckSteps = 0;
+      } else {
+        consecutiveStuckSteps++;
+        if (consecutiveStuckSteps === 2) {
+          log('⚠️ Wizard waiting for input: please review any required fields...', 'warning');
+        }
+        if (consecutiveStuckSteps >= 4) {
+          log('⚠️ Wizard could not advance past current step. Closing modal to proceed with remaining jobs.', 'warning');
+          window.IndeedAutoFormFiller?.closeModal();
+          return { success: false, reason: 'unresolved_fields' };
+        }
         await sleep(2000);
       }
     }
@@ -609,11 +620,29 @@
 
   async function runCrawlLoop() {
     if (isRunning) return;
+
+    // Guard: Verify this tab is the single designated session tab (prevents multi-tab clashing)
+    try {
+      const auth = await new Promise(resolve => {
+        chrome.runtime.sendMessage({ action: 'CHECK_CRAWLER_TAB' }, resp => {
+          if (chrome.runtime.lastError) resolve({ isAllowed: false });
+          else resolve(resp);
+        });
+        setTimeout(() => resolve({ isAllowed: false }), 2500);
+      });
+      if (!auth || !auth.isAllowed) {
+        console.log('[Indeed Auto-Applier] Tab is not the active session tab. Crawler will remain idle.');
+        return;
+      }
+    } catch (_) {
+      return;
+    }
+
     isRunning = true;
     isHalted = false;
 
     log('Starting Auto-Applier crawler loop...', 'info');
-      await loadProcessedJks();
+    await loadProcessedJks();
 
     try {
       const data = await chrome.storage.local.get(['userProfile', 'autoApplySession']);
