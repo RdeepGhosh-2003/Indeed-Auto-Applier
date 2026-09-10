@@ -1,0 +1,83 @@
+{
+  "personal": {
+    "fullName": "Your Name",
+    "firstName": "Your",
+    "lastName": "Name",
+    "email": "your.email@example.com",
+    "phone": "9876543210",
+    "city": "Your City",
+    "state": "State",
+    "country": "Country",
+    "linkedin": "https://linkedin.com/in/yourprofile",
+    "github": "https://github.com/yourprofile"
+  },
+  "work": {
+    "currentRole": {
+      "jobTitle": "Analyst",
+      "company": "Company Name",
+      "yearsExperience": "1",
+      "currentSalary": "300000"
+    },
+    "targetRole": {
+      "jobTitle": "Analyst",
+      "targetLocation": "City, State",
+      "expectedSalary": "360000",
+      "noticePeriod": "Immediate / 15 Days"
+    },
+    "defaultProficiency": "Intermediate"
+  },
+  "education": {
+    "degree": "Bachelor's Degree",
+    "major": "Computer Science / Information Systems",
+    "university": "Your University",
+    "graduationYear": "2023"
+  },
+  "screening": [
+    {
+      "keywords": "excel, advanced excel, vlookup, pivot",
+      "answer": "Yes, highly proficient in Advanced Excel including VLOOKUP, XLOOKUP, Pivot Tables, and macros."
+    },
+    {
+      "keywords": "sql, queries, database",
+      "answer": "Yes, experienced in writing SQL queries for data extraction, joins, and reporting."
+    },
+    {
+      "keywords": "power bi, tableau, dashboard, reporting",
+      "answer": "Yes, experienced in designing automated reporting dashboards and KPI trackers."
+    },
+    {
+      "keywords": "relocate, relocation, commute",
+      "answer": "Yes, willing to commute or relocate."
+    },
+    {
+      "keywords": "notice period, how soon, start date",
+      "answer": "Immediate to 15 Days"
+    },
+    {
+      "keywords": "authorized, legal, work permit",
+      "answer": "Yes"
+    },
+    {
+      "keywords": "experience, years of experience",
+      "answer": "1"
+    }
+  ],
+  "autoApplierSettings": {
+    "targetJobQuery": "Analyst",
+    "targetLocation": "City, State",
+    "dateFilter": "24h",
+    "minMonthlySalary": 25000,
+    "userYearsExp": 1,
+    "unlistedExpAction": "apply",
+    "maxJobsPerSession": 25,
+    "stepDelayMs": 1200,
+    "blacklistKeywords": "intern, unpaid, bpo, telecaller, faculty, teaching, night shift",
+    "targetResumeName": "",
+    "strictLocation": true,
+    "autoSubmit": true,
+    "autoAdvanceStep": true,
+    "autoSelectResume": true,
+    "pauseOnCaptcha": true,
+    "pauseOnUnmatchedFields": true
+  }
+}

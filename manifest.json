@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "Indeed Auto-Applier",
+  "version": "1.0.0",
+  "description": "Intelligent automated job application assistant for Indeed with experience matching, smart filters, and auto-apply.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "tabs",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://*.indeed.com/*",
+    "https://indeed.com/*",
+    "https://*.indeedapply.com/*",
+    "https://indeedapply.com/*"
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "scripts/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.indeed.com/*",
+        "https://indeed.com/*",
+        "https://*.indeedapply.com/*",
+        "https://indeedapply.com/*"
+      ],
+      "all_frames": true,
+      "match_about_blank": true,
+      "js": [
+        "scripts/matcher.js",
+        "scripts/form-filler.js",
+        "scripts/applier.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "data/default_profile.json",
+        "icons/*.png"
+      ],
+      "matches": [
+        "https://*.indeed.com/*",
+        "https://indeed.com/*",
+        "https://*.indeedapply.com/*",
+        "https://indeedapply.com/*"
+      ]
+    }
+  ]
+}
