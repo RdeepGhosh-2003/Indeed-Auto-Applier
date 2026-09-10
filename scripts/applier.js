@@ -5,9 +5,39 @@
  */
 
 (function() {
+  // CRITICAL GUARD: Only run the crawler engine in the TOP browser window.
+  // Child iframes (tracking, ads, smart-apply) must NEVER scan cards or control crawl sessions.
+  if (window !== window.top) {
+    console.log('[Indeed Auto-Applier] Child frame detected; skipping crawler engine.');
+    return;
+  }
+
   let isRunning = false;
   let isHalted = false;
   let processedJks = new Set();
+  // Load and persist processed job keys across pagination / page reloads
+  async function loadProcessedJks() {
+    try {
+      const data = await chrome.storage.local.get(['autoApplySession']);
+      const list = data?.autoApplySession?.processedJks || [];
+      list.forEach(jk => processedJks.add(jk));
+    } catch (_) {}
+  }
+
+  async function persistProcessedJk(jk) {
+    await persistProcessedJk(jk);
+    try {
+      const data = await chrome.storage.local.get(['autoApplySession']);
+      if (data?.autoApplySession) {
+        if (!data.autoApplySession.processedJks) data.autoApplySession.processedJks = [];
+        if (!data.autoApplySession.processedJks.includes(jk)) {
+          data.autoApplySession.processedJks.push(jk);
+          await chrome.storage.local.set({ autoApplySession: data.autoApplySession });
+        }
+      }
+    } catch (_) {}
+  }
+
 
   function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -230,9 +260,10 @@
   }
 
   // Execute Indeed Apply wizard flow
+    // Execute Indeed Apply wizard flow with cross-frame coordination
   async function executeIndeedApplication(profile, settings) {
-    log('Waiting for application wizard modal to open...', 'info');
-    await sleep(2000);
+    log('Waiting for application wizard modal/frame to load...', 'info');
+    await sleep(2500);
 
     const maxSteps = 12;
     let stepCount = 0;
@@ -241,48 +272,109 @@
       if (isHalted) return { success: false, reason: 'halted' };
       stepCount++;
 
-      if (window.IndeedAutoFormFiller?.checkCaptcha()) {
-        log('⚠️ CAPTCHA detected on application! Pausing for user verification...', 'warning');
-        while (window.IndeedAutoFormFiller?.checkCaptcha() && !isHalted) {
-          await sleep(2000);
+      let handled = false;
+
+      // 1. Try local window.top execution first (if modal is in parent DOM)
+      try {
+        const localContainer = window.SpeedFillMatcher?.getAppContainer() || document.querySelector('[data-testid="ia-container"], #ia-container, div[role="dialog"]');
+        if (localContainer && window.IndeedAutoFormFiller) {
+          if (window.IndeedAutoFormFiller.checkCaptcha()) {
+            log('⚠️ CAPTCHA detected on application! Pausing for user verification...', 'warning');
+            while (window.IndeedAutoFormFiller.checkCaptcha() && !isHalted) {
+              await sleep(2000);
+            }
+          }
+
+          if (window.IndeedAutoFormFiller.isApplicationSubmitted(localContainer)) {
+            log('🎉 Confirmation detected: Application has been submitted!', 'success');
+            await sleep(1500);
+            window.IndeedAutoFormFiller.closeModal();
+            return { success: true };
+          }
+
+          const fillRes = window.IndeedAutoFormFiller.fillCurrentStep(profile);
+          log(`Step ${stepCount}: Auto-filled ${fillRes?.filled || 0} fields.`, 'info');
+          await humanDelay(settings?.stepDelayMs || 1200);
+
+          const advRes = await window.IndeedAutoFormFiller.advanceOrSubmit(localContainer);
+          if (advRes?.action === 'submitted') {
+            log('Clicked Submit Application button!', 'info');
+            await sleep(3000);
+            if (window.IndeedAutoFormFiller.isApplicationSubmitted(localContainer)) {
+              window.IndeedAutoFormFiller.closeModal();
+              return { success: true };
+            }
+          } else if (advRes?.action === 'advanced') {
+            log('Advanced to next step...', 'info');
+            await sleep(2000);
+          } else {
+            await sleep(1500);
+          }
+          handled = true;
         }
-        log('✅ CAPTCHA cleared, resuming application flow...', 'info');
+      } catch (localErr) {
+        console.warn('[Auto-Applier] Local wizard step error:', localErr);
+      }
+
+      // 2. If not handled locally, broadcast to active application subframes (e.g. smart-apply iframe)
+      if (!handled) {
+        try {
+          const response = await new Promise((resolve) => {
+            chrome.runtime.sendMessage({
+              action: 'FORWARD_TO_ACTIVE_TAB',
+              message: { action: 'IA_FILL_AND_ADVANCE', profile, settings }
+            }, (resp) => {
+              if (chrome.runtime.lastError) resolve(null);
+              else resolve(resp);
+            });
+            setTimeout(() => resolve(null), 4000);
+          });
+
+          if (response && response.handled) {
+            handled = true;
+            if (response.action === 'submitted') {
+              log('🎉 Application submitted in application frame!', 'success');
+              return { success: true };
+            } else if (response.action === 'captcha_detected') {
+              log('⚠️ CAPTCHA detected in application frame! Pausing...', 'warning');
+              await sleep(5000);
+            } else if (response.action === 'advanced') {
+              log(`Step ${stepCount}: Auto-filled ${response.filled || 0} fields & advanced in application frame.`, 'info');
+              await sleep(2000);
+            }
+          }
+        } catch (frameErr) {
+          console.warn('[Auto-Applier] Frame messaging error:', frameErr);
+        }
+      }
+
+      // 3. Inspect iframes directly for submission confirmation
+      const iframes = Array.from(document.querySelectorAll('iframe[name*="indeedapply"], iframe[id*="indeedapply"], iframe[src*="smartapply"], iframe[src*="indeedapply"], div[role="dialog"] iframe'));
+      for (const iframe of iframes) {
+        try {
+          const idoc = iframe.contentDocument || iframe.contentWindow?.document;
+          if (idoc && idoc.body) {
+            const subSubmitted = idoc.querySelector('.ia-Confirmation, [data-testid="ia-Confirmation"], [data-testid*="success"]');
+            if (subSubmitted || idoc.body.innerText.toLowerCase().includes('application submitted')) {
+              log('🎉 Confirmation detected in iframe: Application submitted!', 'success');
+              return { success: true };
+            }
+          }
+        } catch (_) {}
       }
 
       if (window.IndeedAutoFormFiller?.isApplicationSubmitted()) {
-        log('🎉 Confirmation detected: Application has been submitted!', 'success');
-        await sleep(1500);
-        window.IndeedAutoFormFiller?.closeModal();
+        window.IndeedAutoFormFiller.closeModal();
         return { success: true };
       }
 
-      const fillRes = window.IndeedAutoFormFiller?.fillCurrentStep(profile);
-      log(`Step ${stepCount}: Auto-filled ${fillRes?.filled || 0} fields.`, 'info');
-
-      await humanDelay(settings?.stepDelayMs || 1200);
-
-      const advRes = window.IndeedAutoFormFiller?.advanceOrSubmit();
-      if (advRes?.action === 'submitted') {
-        log('Clicked Submit Application button!', 'info');
-        await sleep(3000);
-        if (window.IndeedAutoFormFiller?.isApplicationSubmitted()) {
-          window.IndeedAutoFormFiller?.closeModal();
-          return { success: true };
-        }
-      } else if (advRes?.action === 'advanced') {
-        log('Advanced to next step...', 'info');
+      if (!handled) {
         await sleep(2000);
-      } else {
-        if (window.IndeedAutoFormFiller?.isApplicationSubmitted()) {
-          window.IndeedAutoFormFiller?.closeModal();
-          return { success: true };
-        }
-        await sleep(1500);
       }
     }
 
     if (window.IndeedAutoFormFiller?.isApplicationSubmitted()) {
-      window.IndeedAutoFormFiller?.closeModal();
+      window.IndeedAutoFormFiller.closeModal();
       return { success: true };
     }
 
@@ -307,7 +399,7 @@
       card.style.border = originalBorder;
       return 'already_processed';
     }
-    processedJks.add(jk);
+    await persistProcessedJk(jk);
 
     chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { scanned: 1 } }).catch(() => {});
 
@@ -490,6 +582,7 @@
     isHalted = false;
 
     log('Starting Auto-Applier crawler loop...', 'info');
+      await loadProcessedJks();
 
     try {
       const data = await chrome.storage.local.get(['userProfile', 'autoApplySession']);
@@ -537,10 +630,15 @@
             break;
           }
 
-          const status = await processJobCard(card, profile, settings);
-          if (status !== 'already_processed') {
-            processedAnyOnPage = true;
-            await humanDelay(settings.stepDelayMs || 1500);
+          try {
+            const status = await processJobCard(card, profile, settings);
+            if (status !== 'already_processed') {
+              processedAnyOnPage = true;
+              await humanDelay(settings.stepDelayMs || 1500);
+            }
+          } catch (cardErr) {
+            log(`⚠️ Error evaluating card: ${cardErr.message}. Skipping to next job...`, 'warning');
+            try { card.style.border = ''; } catch (_) {}
           }
         }
 

@@ -43,7 +43,17 @@
       "match_about_blank": true,
       "js": [
         "scripts/matcher.js",
-        "scripts/form-filler.js",
+        "scripts/form-filler.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*.indeed.com/*",
+        "https://indeed.com/*"
+      ],
+      "all_frames": false,
+      "js": [
         "scripts/applier.js"
       ],
       "run_at": "document_idle"

@@ -104,7 +104,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === 'FORWARD_TO_ACTIVE_TAB' && request.message) {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (!tabs || tabs.length === 0) {
+        sendResponse({ handled: false, reason: 'no_active_tab' });
+        return;
+      }
+      chrome.tabs.sendMessage(tabs[0].id, request.message, (resp) => {
+        if (chrome.runtime.lastError) {
+          sendResponse({ handled: false, error: chrome.runtime.lastError.message });
+        } else {
+          sendResponse(resp || { handled: false });
+        }
+      });
+    });
+    return true;
+  }
+
   if (request.action === 'SESSION_COMPLETED') {
+    if (sender && sender.frameId && sender.frameId !== 0) {
+      console.warn('[Background] Ignored SESSION_COMPLETED from non-top frame:', sender.frameId);
+      sendResponse({ status: 'ignored' });
+      return true;
+    }
     handleSessionCompleted(request.summary);
     sendResponse({ status: 'ok' });
     return true;

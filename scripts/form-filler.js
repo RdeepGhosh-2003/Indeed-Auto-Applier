@@ -22,6 +22,20 @@
     }
   });
 
+    // Trigger realistic synthetic click for React buttons
+  function triggerClick(el) {
+    if (!el) return;
+    try {
+      el.focus();
+      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+      el.click();
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch (e) {
+      el.click();
+    }
+  }
+
   function setSelectValue(selectEl, value) {
     if (!selectEl || !value) return false;
     if (selectEl.disabled) return false;
@@ -320,38 +334,121 @@
     return { filled, containerFound: true };
   }
 
-  function advanceOrSubmit(container) {
+    async function advanceOrSubmit(container) {
     const scope = container || window.SpeedFillMatcher?.getAppContainer() || document;
 
-    const buttons = Array.from(scope.querySelectorAll('button, a[role="button"], input[type="submit"]'));
-    const submitBtn = buttons.find(b => {
+    const findButtons = () => Array.from(scope.querySelectorAll('button, a[role="button"], input[type="submit"], input[type="button"]'));
+
+    // Check for Submit button first
+    let buttons = findButtons();
+    let submitBtn = buttons.find(b => {
       if (b.offsetWidth === 0 && b.offsetHeight === 0) return false;
-      if (b.disabled || b.getAttribute('aria-disabled') === 'true') return false;
+      const testId = (b.getAttribute('data-testid') || '').toLowerCase();
+      const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+      const cls = (b.className || '').toLowerCase();
       const t = (b.textContent || b.value || '').toLowerCase().trim();
-      return t === 'submit your application' || t.includes('submit application') || t === 'submit';
+      return testId.includes('submit') || aria.includes('submit') || cls.includes('submit') ||
+             t === 'submit your application' || t.includes('submit application') || t === 'submit';
     });
 
     if (submitBtn) {
+      let attempts = 0;
+      while ((submitBtn.disabled || submitBtn.getAttribute('aria-disabled') === 'true') && attempts < 15) {
+        await new Promise(r => setTimeout(r, 100));
+        attempts++;
+      }
       console.log('[Auto-Applier FormFiller] Clicking Submit button...');
-      submitBtn.click();
+      triggerClick(submitBtn);
       return { action: 'submitted', button: submitBtn };
     }
 
-    const continueBtn = buttons.find(b => {
+    // Check for Continue / Next / Review button
+    let continueBtn = buttons.find(b => {
       if (b.offsetWidth === 0 && b.offsetHeight === 0) return false;
-      if (b.disabled || b.getAttribute('aria-disabled') === 'true') return false;
+      const testId = (b.getAttribute('data-testid') || '').toLowerCase();
+      const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+      const cls = (b.className || '').toLowerCase();
       const t = (b.textContent || b.value || '').toLowerCase().trim();
-      return t === 'continue' || t.includes('continue') || t.includes('next') || t.includes('review your application');
+      return testId.includes('continue') || aria.includes('continue') || cls.includes('continue') ||
+             testId.includes('review') || aria.includes('review') || cls.includes('review') ||
+             testId.includes('next') || aria.includes('next') ||
+             t === 'continue' || t.includes('continue') || t.includes('next') ||
+             t === 'review' || t.includes('review your application') || t.includes('review application');
     });
 
     if (continueBtn) {
-      console.log('[Auto-Applier FormFiller] Clicking Continue/Next button...');
-      continueBtn.click();
+      let attempts = 0;
+      while ((continueBtn.disabled || continueBtn.getAttribute('aria-disabled') === 'true') && attempts < 15) {
+        await new Promise(r => setTimeout(r, 100));
+        attempts++;
+      }
+      console.log('[Auto-Applier FormFiller] Clicking Continue/Next/Review button...');
+      triggerClick(continueBtn);
       return { action: 'advanced', button: continueBtn };
     }
 
     return { action: 'none' };
   }
+
+  
+  // Autonomous step execution (fill + wait + advance/submit)
+  async function handleStepFillAndAdvance(profile, settings) {
+    const prof = profile || activeProfile;
+    const container = window.SpeedFillMatcher?.getAppContainer() || document.querySelector('[data-testid="ia-container"], #ia-container, div[role="dialog"], form');
+    if (!container) return { handled: false, reason: 'no_container' };
+
+    if (checkCaptcha()) {
+      return { handled: true, action: 'captcha_detected' };
+    }
+
+    if (isApplicationSubmitted(container)) {
+      closeModal();
+      return { handled: true, action: 'submitted' };
+    }
+
+    // 1. Fill fields
+    const fillRes = fillCurrentStep(prof);
+    const delay = Math.max(800, (settings?.stepDelayMs || 1200) + Math.floor(Math.random() * 400) - 200);
+    await new Promise(r => setTimeout(r, delay));
+
+    // 2. Advance or submit
+    const advRes = await advanceOrSubmit(container);
+
+    // 3. Immediate re-check for submission confirmation
+    await new Promise(r => setTimeout(r, 1000));
+    if (isApplicationSubmitted(container)) {
+      closeModal();
+      return { handled: true, action: 'submitted', filled: fillRes?.filled || 0 };
+    }
+
+    return { handled: true, action: advRes.action, filled: fillRes?.filled || 0 };
+  }
+
+  // Cross-frame runtime message listener
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'IA_FILL_AND_ADVANCE') {
+      handleStepFillAndAdvance(request.profile, request.settings)
+        .then(res => sendResponse(res))
+        .catch(err => sendResponse({ handled: false, error: err.message }));
+      return true;
+    }
+
+    if (request.action === 'IA_CHECK_STATUS') {
+      const container = window.SpeedFillMatcher?.getAppContainer() || document.querySelector('[data-testid="ia-container"], #ia-container, div[role="dialog"], form');
+      sendResponse({
+        hasContainer: !!container,
+        isSubmitted: isApplicationSubmitted(container),
+        hasCaptcha: checkCaptcha()
+      });
+      return true;
+    }
+
+    if (request.action === 'IA_CLOSE_MODAL') {
+      closeModal();
+      sendResponse({ ok: true });
+      return true;
+    }
+  });
 
   function closeModal() {
     const closeBtn = document.querySelector('[aria-label="Close"], [data-testid="ia-close-button"], button.ia-CloseButton, div[role="dialog"] button[aria-label*="close"]');
@@ -385,6 +482,7 @@
   window.IndeedAutoFormFiller = {
     fillCurrentStep,
     advanceOrSubmit,
+    handleStepFillAndAdvance,
     checkCaptcha,
     isApplicationSubmitted,
     closeModal,
