@@ -1,15 +1,13 @@
 /**
  * Indeed Auto-Applier - Core Crawl & Apply Engine
- * Scans Indeed job cards, parses experience, evaluates salary, triggers auto-apply,
- * saves company website jobs, and handles pagination.
+ * Scans Indeed job cards, parses experience, evaluates salary range,
+ * triggers 'Apply with Indeed', saves company site jobs, and handles pagination.
  */
 
 (function() {
   let isRunning = false;
   let isHalted = false;
   let processedJks = new Set();
-  let currentSession = null;
-  let activeCardIndex = 0;
 
   function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -20,6 +18,20 @@
     chrome.runtime.sendMessage({ action: 'APPEND_LOG', message, logType: type }).catch(() => {});
   }
 
+  // Helper to trigger realistic click on React elements
+  function triggerClick(el) {
+    if (!el) return;
+    try {
+      el.focus();
+      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+      el.click();
+    } catch (e) {
+      el.click();
+    }
+  }
+
+  // Parse salary string to { minMonthly, maxMonthly } INR
   function parseMonthlySalary(salaryStr) {
     if (!salaryStr) return null;
     const lower = salaryStr.toLowerCase().replace(/,/g, '');
@@ -28,46 +40,61 @@
       const nums = lower.match(/\\d+/g);
       if (!nums || nums.length === 0) return null;
 
-      const val = parseInt(nums[0], 10);
-      if (lower.includes('year') || lower.includes('lpa') || lower.includes('annum') || val > 80000) {
-        return Math.round(val / 12);
-      }
-      if (lower.includes('month') || lower.includes('pm') || lower.includes('per month')) {
+      const parsedVals = nums.map(n => parseInt(n, 10)).filter(n => !isNaN(n) && n > 100);
+      if (parsedVals.length === 0) return null;
+
+      const toMonthly = (val) => {
+        if (lower.includes('year') || lower.includes('lpa') || lower.includes('annum') || val > 80000) {
+          return Math.round(val / 12);
+        }
+        if (lower.includes('month') || lower.includes('pm') || lower.includes('per month')) {
+          return val;
+        }
+        if (lower.includes('day')) {
+          return val * 22;
+        }
+        if (lower.includes('hour')) {
+          return val * 176;
+        }
+        if (val >= 10000 && val <= 80000) {
+          return val;
+        }
+        if (val > 80000) {
+          return Math.round(val / 12);
+        }
         return val;
-      }
-      if (lower.includes('day')) {
-        return val * 22;
-      }
-      if (lower.includes('hour')) {
-        return val * 176;
-      }
-      if (val >= 10000 && val <= 80000) {
-        return val;
-      }
-      if (val > 80000) {
-        return Math.round(val / 12);
-      }
+      };
+
+      const monthlyVals = parsedVals.map(toMonthly);
+      const minMonthly = Math.min(...monthlyVals);
+      const maxMonthly = Math.max(...monthlyVals);
+
+      return { minMonthly, maxMonthly };
     }
 
     return null;
   }
 
+  // Parse experience requirement from text
   function parseExperienceRequirement(title, description) {
     const fullText = `${title} \\n ${description}`.toLowerCase();
 
-    if (/\\b(fresher|entry level|intern|trainee|0\\s*-\\s*1|0\\s*-\\s*2|no experience required)\\b/i.test(fullText)) {
+    // 1. Fresher / 0 years indicators
+    if (/\\b(fresher|entry level|intern|trainee|0\\s*-\\s*1\\s*(?:years?|yrs?)|0\\s*-\\s*2\\s*(?:years?|yrs?)|no experience required|freshers(?:\s+are)?\s+welcome)\\b/i.test(fullText)) {
       return 0;
     }
 
-    const patterns = [
-      /(\\d+(?:\\.\\d+)?)\\s*(?:to|-|\\+)?\\s*(?:\\d+(?:\\.\\d+)?)?\\s*(?:years?|yrs?)(?:\\s+of\\s+experience)?/i,
-      /experience\\s*(?:required|needed)?\\s*:\\s*(\\d+(?:\\.\\d+)?)/i,
-      /minimum\\s*(\\d+(?:\\.\\d+)?)\\s*(?:years?|yrs?)/i,
-      /at least\\s*(\\d+(?:\\.\\d+)?)\\s*(?:years?|yrs?)/i,
-      /(\\d+)\\+?\\s*years?/i
+    // 2. Explicit patterns for required experience
+    const expPatterns = [
+      /(?:experience|exp)\\s*(?:required|needed|mandatory)?\\s*[:\\-]?\\s*(\\d+(?:\\.\\d+)?)\\s*(?:to|-|\\+)?\\s*(\\d+(?:\\.\\d+)?)?\\s*(?:years?|yrs?)/i,
+      /(\\d+(?:\\.\\d+)?)\\s*(?:to|-)\\s*(\\d+(?:\\.\\d+)?)\\s*(?:years?|yrs?)(?:\\s+(?:of\\s+)?(?:relevant\\s+)?experience)?/i,
+      /(\\d+(?:\\.\\d+)?)\\s*\\+\\s*(?:years?|yrs?)(?:\\s+(?:of\\s+)?(?:relevant\\s+)?experience)/i,
+      /(\\d+(?:\\.\\d+)?)\\s*(?:years?|yrs?)\\s+(?:of\\s+)?(?:relevant\\s+)?experience/i,
+      /minimum\\s*(?:of\\s*)?(\\d+(?:\\.\\d+)?)\\s*(?:years?|yrs?)/i,
+      /at least\\s*(\\d+(?:\\.\\d+)?)\\s*(?:years?|yrs?)/i
     ];
 
-    for (const pat of patterns) {
+    for (const pat of expPatterns) {
       const match = fullText.match(pat);
       if (match && match[1]) {
         const val = parseFloat(match[1]);
@@ -77,44 +104,84 @@
       }
     }
 
+    // 3. Senior role title hints
     if (/\\b(senior|sr\\.|lead|manager|principal|architect|head of)\\b/i.test(title)) {
-      return 4;
+      if (!/\\b(executive|assistant|junior|jr\\.|trainee|associate)\\b/i.test(title)) {
+        return 4;
+      }
     }
 
-    return null;
+    return null; // Unlisted
   }
 
+  // Inspect Apply Button type in details pane
   function inspectApplyButton(detailsPane) {
     const scope = detailsPane || document;
 
-    const companySiteBtn = scope.querySelector(
-      'a[aria-label*="Apply on company site"], a[aria-label*="Apply on employer site"], a[id="applyButtonLinkContainer"], a[href*="apply"]'
-    );
-    const allLinks = Array.from(scope.querySelectorAll('a, button'));
-    const isCompanySite = companySiteBtn || allLinks.some(el => {
-      const txt = (el.textContent || '').toLowerCase().trim();
-      return txt.includes('apply on company site') || txt.includes('apply on employer site');
-    });
+    const allClickables = Array.from(scope.querySelectorAll('button, a, div[role="button"], input[type="button"], input[type="submit"]'))
+      .filter(el => el.offsetWidth > 0 && el.offsetHeight > 0);
 
-    if (isCompanySite) {
-      const url = companySiteBtn ? companySiteBtn.href : window.location.href;
-      return { type: 'company_site', element: companySiteBtn, url };
+    // 1. Check for "Apply with Indeed" / "Easily apply" / "Apply now" FIRST
+    const indeedSelector = scope.querySelector(
+      '#indeedApplyButton, button[id="indeedApplyButton"], [data-testid*="indeedApply"], [data-indeed-apply="true"], button[aria-label*="Apply with Indeed"], button[aria-label*="Easily apply"], button[aria-label*="Apply now"]'
+    );
+
+    if (indeedSelector) {
+      return { type: 'indeed_apply', element: indeedSelector };
     }
 
-    const indeedApplyBtn = scope.querySelector(
-      'button[id="indeedApplyButton"], button[aria-label*="Apply now"], button[aria-label*="Easily apply"], #indeedApplyButton'
-    ) || allLinks.find(el => {
-      const txt = (el.textContent || '').toLowerCase().trim();
-      return txt === 'apply now' || txt === 'easily apply' || txt.includes('apply with indeed');
+    const indeedByText = allClickables.find(el => {
+      const txt = (el.textContent || el.value || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+      const aria = (el.getAttribute('aria-label') || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+      return txt.includes('apply with indeed') || aria.includes('apply with indeed') ||
+             txt === 'easily apply' || aria.includes('easily apply') ||
+             txt === 'apply now' || aria.includes('apply now');
     });
 
-    if (indeedApplyBtn) {
-      return { type: 'indeed_apply', element: indeedApplyBtn };
+    if (indeedByText) {
+      return { type: 'indeed_apply', element: indeedByText };
+    }
+
+    // 2. Check for "Apply on company site"
+    const companySiteSelector = scope.querySelector(
+      'a[aria-label*="Apply on company site"], a[aria-label*="Apply on employer site"], a[id="applyButtonLinkContainer"]'
+    );
+
+    if (companySiteSelector) {
+      const url = companySiteSelector.href || window.location.href;
+      return { type: 'company_site', element: companySiteSelector, url };
+    }
+
+    const companyByText = allClickables.find(el => {
+      const txt = (el.textContent || el.value || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+      const aria = (el.getAttribute('aria-label') || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+      return txt.includes('apply on company site') || aria.includes('apply on company site') ||
+             txt.includes('apply on employer site') || aria.includes('apply on employer site') ||
+             txt.includes('apply on company website');
+    });
+
+    if (companyByText) {
+      const url = companyByText.href || companyByText.getAttribute('href') || window.location.href;
+      return { type: 'company_site', element: companyByText, url };
     }
 
     return { type: 'unknown', element: null };
   }
 
+  // Wait for right-side job description to load
+  async function waitForJobDetails(maxWaitMs = 3500) {
+    const start = Date.now();
+    while (Date.now() - start < maxWaitMs) {
+      const desc = document.querySelector('#jobDescriptionText, .jobsearch-jobDescriptionText, [data-testid="jobDescriptionText"]');
+      if (desc && desc.textContent.trim().length > 30) {
+        return desc;
+      }
+      await sleep(250);
+    }
+    return document.querySelector('#jobDescriptionText, .jobsearch-jobDescriptionText');
+  }
+
+  // Execute Indeed Apply wizard flow
   async function executeIndeedApplication(profile, settings) {
     log('Waiting for application wizard modal to open...', 'info');
     await sleep(2000);
@@ -175,6 +242,7 @@
     return { success: false, reason: 'max_steps_exceeded' };
   }
 
+  // Process a single job card
   async function processJobCard(card, profile, settings) {
     if (isHalted) return 'halted';
 
@@ -195,9 +263,12 @@
 
     chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { scanned: 1 } }).catch(() => {});
 
+    // Click card to open right-side details
     const clickable = card.querySelector('h2.jobTitle a, a.jcs-JobTitle, a[data-jk], h2 a') || card;
-    clickable.click();
-    await sleep(2000);
+    triggerClick(clickable);
+
+    // Wait for details pane to load
+    const descEl = await waitForJobDetails(3500);
 
     const viewPane = document.querySelector('#jobsearch-ViewjobPaneWrapper, .jobsearch-JobComponent, div[data-testid="jobsearch-ViewjobPaneWrapper"]');
     const scope = viewPane || document;
@@ -206,7 +277,6 @@
     const companyEl = scope.querySelector('div[data-testid="inlineHeader-companyName"], [data-company-name="true"], .companyName') || card.querySelector('.companyName');
     const locationEl = scope.querySelector('div[data-testid="inlineHeader-companyLocation"], .companyLocation') || card.querySelector('.companyLocation');
     const salaryEl = scope.querySelector('div[data-testid="attribute_snippet_testid"], #salaryInfoAndJobType, .salary-snippet-container') || card.querySelector('.salary-snippet-container, [data-testid="attribute_snippet_testid"]');
-    const descEl = scope.querySelector('#jobDescriptionText, .jobsearch-jobDescriptionText');
 
     const jobTitle = titleEl ? titleEl.textContent.trim() : 'Unknown Role';
     const company = companyEl ? companyEl.textContent.trim() : 'Unknown Company';
@@ -217,14 +287,16 @@
 
     log(`🔍 Inspecting: "${jobTitle}" at "${company}" (${location})`, 'info');
 
-    // 1. Salary Check
-    const minSalary = settings?.minMonthlySalary || 25000;
-    const estSalary = parseMonthlySalary(salaryText);
-    if (estSalary && estSalary < minSalary) {
-      log(`⏭️ Skipped: "${jobTitle}" salary (est. ₹${estSalary.toLocaleString()}/mo) below ₹${minSalary.toLocaleString()} minimum floor.`, 'info');
-      chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1 } }).catch(() => {});
-      card.style.border = originalBorder;
-      return 'skipped_salary';
+    // 1. Salary Check: if job provides salary, only skip if even its UPPER limit is below our floor
+    const minSalaryFloor = settings?.minMonthlySalary || 25000;
+    const sal = parseMonthlySalary(salaryText);
+    if (sal) {
+      if (sal.maxMonthly < minSalaryFloor) {
+        log(`⏭️ Skipped: "${jobTitle}" salary range (₹${sal.minMonthly.toLocaleString()} - ₹${sal.maxMonthly.toLocaleString()}/mo) below ₹${minSalaryFloor.toLocaleString()} floor.`, 'info');
+        chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1 } }).catch(() => {});
+        card.style.border = originalBorder;
+        return 'skipped_salary';
+      }
     }
 
     // 2. Experience Check
@@ -256,7 +328,7 @@
       return 'skipped_experience';
     }
 
-    // Case: Experience matches
+    // Case: Experience matches!
     log(`🎯 Experience match (${reqExp} <= ${userExp} yr) for "${jobTitle}"! Checking apply type...`, 'success');
 
     const applyInfo = inspectApplyButton(viewPane);
@@ -275,7 +347,7 @@
     // Subcase: Indeed Apply
     if (applyInfo.type === 'indeed_apply') {
       log(`🚀 "Apply with Indeed" found! Triggering application...`, 'info');
-      applyInfo.element.click();
+      triggerClick(applyInfo.element);
 
       const result = await executeIndeedApplication(profile, settings);
       if (result.success) {
@@ -308,7 +380,7 @@
 
     if (nextBtn && nextBtn.href) {
       log('Navigating to next page of results...', 'info');
-      nextBtn.click();
+      triggerClick(nextBtn);
       await sleep(4000);
       return true;
     }
