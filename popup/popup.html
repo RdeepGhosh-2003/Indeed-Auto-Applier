@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Indeed Auto-Applier</title>
+  <link rel="stylesheet" href="popup.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <span class="app-logo">⚡</span>
+        <div>
+          <h1 class="app-title">Indeed <span>Auto-Applier</span></h1>
+          <span id="session-badge" class="status-badge status-idle">Ready</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <button id="theme-toggle-btn" class="icon-btn" title="Toggle Theme">🌙</button>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs">
+      <button class="nav-tab-btn active" data-tab="tab-dashboard">🚀 Auto-Apply</button>
+      <button class="nav-tab-btn" data-tab="tab-rules">⚙️ Rules & Filters</button>
+      <button class="nav-tab-btn" data-tab="tab-saved">📋 Saved Jobs <span id="saved-count-badge" class="badge">0</span></button>
+      <button class="nav-tab-btn" data-tab="tab-profile">👤 Profile</button>
+    </nav>
+
+    <!-- Tab Contents -->
+    <main class="tab-content-area">
+      
+      <!-- TAB 1: AUTO-APPLY DASHBOARD -->
+      <section id="tab-dashboard" class="tab-pane active">
+        <div class="control-card">
+          <div class="control-actions">
+            <button id="btn-start" class="btn btn-primary btn-large">
+              <span>▶</span> Start Auto-Apply
+            </button>
+            <button id="btn-stop" class="btn btn-danger btn-large" disabled>
+              <span>⏹</span> Stop
+            </button>
+          </div>
+          <div class="progress-wrapper">
+            <div class="progress-info">
+              <span>Session Progress</span>
+              <span id="progress-text">0 / 25 Jobs</span>
+            </div>
+            <div class="progress-bar-bg">
+              <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <span class="metric-label">Scanned</span>
+            <span id="metric-scanned" class="metric-value">0</span>
+          </div>
+          <div class="metric-card metric-success">
+            <span class="metric-label">Applied ✅</span>
+            <span id="metric-applied" class="metric-value">0</span>
+          </div>
+          <div class="metric-card metric-warning">
+            <span class="metric-label">Saved 📋</span>
+            <span id="metric-saved" class="metric-value">0</span>
+          </div>
+          <div class="metric-card metric-neutral">
+            <span class="metric-label">Skipped ⏭️</span>
+            <span id="metric-skipped" class="metric-value">0</span>
+          </div>
+        </div>
+
+        <div class="console-card">
+          <div class="console-header">
+            <span>Live Activity Log</span>
+            <button id="btn-clear-logs" class="text-btn">Clear</button>
+          </div>
+          <div id="console-logs" class="console-body">
+            <div class="log-entry log-info">[System] Indeed Auto-Applier standing by. Click Start to begin session.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: RULES & FILTERS -->
+      <section id="tab-rules" class="tab-pane">
+        <div class="form-card">
+          <h3 class="card-title">🔍 Search Target</h3>
+          <div class="form-group">
+            <label for="rule-query">Target Job Title / Keywords</label>
+            <input type="text" id="rule-query" placeholder="e.g. MIS Analyst, Data Analyst">
+          </div>
+          <div class="form-group">
+            <label for="rule-location">Target Location</label>
+            <input type="text" id="rule-location" placeholder="e.g. Bangalore, Karnataka">
+          </div>
+        </div>
+
+        <div class="form-card">
+          <h3 class="card-title">🛡️ Filter & Decision Rules</h3>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="rule-exp">Max Years of Experience Cutoff</label>
+              <input type="number" id="rule-exp" value="1" min="0" max="20">
+              <small class="hint">Jobs requiring more than this will be skipped.</small>
+            </div>
+            <div class="form-group">
+              <label for="rule-salary">Minimum Salary Floor (₹/month)</label>
+              <input type="number" id="rule-salary" value="25000" min="0" step="1000">
+              <small class="hint">Jobs offering less than this will be skipped.</small>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="rule-unlisted-exp">If Job Has No Experience Listed:</label>
+            <select id="rule-unlisted-exp">
+              <option value="save" selected>Save to List for Manual Review (Recommended)</option>
+              <option value="apply">Attempt Auto-Apply</option>
+              <option value="skip">Skip Job</option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="rule-max-jobs">Max Jobs Per Session</label>
+              <input type="number" id="rule-max-jobs" value="25" min="1" max="100">
+            </div>
+            <div class="form-group">
+              <label for="rule-delay">Action Delay (ms)</label>
+              <input type="number" id="rule-delay" value="1500" min="500" max="10000" step="100">
+            </div>
+          </div>
+
+          <button id="btn-save-rules" class="btn btn-primary full-width">Save Rules & Filters</button>
+        </div>
+      </section>
+
+      <!-- TAB 3: SAVED JOBS -->
+      <section id="tab-saved" class="tab-pane">
+        <div class="saved-actions-bar">
+          <input type="text" id="saved-search-input" placeholder="Search saved jobs..." class="search-input">
+          <div class="btn-group">
+            <button id="btn-export-saved" class="btn btn-secondary">Export CSV</button>
+            <button id="btn-clear-saved" class="btn btn-danger">Clear All</button>
+          </div>
+        </div>
+        <div id="saved-jobs-container" class="saved-list-container">
+        </div>
+      </section>
+
+      <!-- TAB 4: PROFILE & SCREENING -->
+      <section id="tab-profile" class="tab-pane">
+        <div class="form-card">
+          <h3 class="card-title">👤 Personal Details</h3>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="prof-fullname">Full Name</label>
+              <input type="text" id="prof-fullname" placeholder="John Doe">
+            </div>
+            <div class="form-group">
+              <label for="prof-phone">Phone Number</label>
+              <input type="text" id="prof-phone" placeholder="9876543210">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="prof-email">Email Address</label>
+              <input type="email" id="prof-email" placeholder="john@example.com">
+            </div>
+            <div class="form-group">
+              <label for="prof-city">City, State</label>
+              <input type="text" id="prof-city" placeholder="Bangalore, Karnataka">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-card">
+          <h3 class="card-title">💼 Work & Experience</h3>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="prof-curr-title">Current Job Title</label>
+              <input type="text" id="prof-curr-title" placeholder="MIS Analyst">
+            </div>
+            <div class="form-group">
+              <label for="prof-curr-company">Current Company</label>
+              <input type="text" id="prof-curr-company" placeholder="Company Name">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="prof-years-exp">Total Years of Experience</label>
+              <input type="text" id="prof-years-exp" placeholder="1">
+            </div>
+            <div class="form-group">
+              <label for="prof-notice">Notice Period</label>
+              <input type="text" id="prof-notice" placeholder="Immediate / 15 Days">
+            </div>
+          </div>
+          <button id="btn-save-profile" class="btn btn-primary full-width">Save Profile Details</button>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
