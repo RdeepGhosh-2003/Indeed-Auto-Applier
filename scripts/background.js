@@ -120,8 +120,8 @@ async function handleStartAutoApply(customSettings) {
   const query = encodeURIComponent(settings.targetJobQuery || profile.work?.targetRole?.jobTitle || 'MIS Analyst');
   const loc = encodeURIComponent(settings.targetLocation || profile.work?.targetRole?.targetLocation || 'Bangalore, Karnataka');
 
-  // Date posted filter: 'fromage=1' for Last 24 hours
-  let searchUrl = `https://in.indeed.com/jobs?q=${query}&l=${loc}&fromage=1`;
+  // Date posted filter: 'fromage=1' for Last 24 hours, sorted by date (newest first)
+  let searchUrl = `https://in.indeed.com/jobs?q=${query}&l=${loc}&fromage=1&sort=date`;
 
   const session = {
     isRunning: true,

@@ -1,17 +1,26 @@
 /**
  * Indeed Auto-Applier - Form Filler Module
- * Adapts SpeedFill engine for autonomous multi-step form completion, radio answering,
+ * Autonomous multi-step form completion, radio answering,
  * resume selection, step advancement, and application submission.
  */
 
 (function() {
   let hasNotifiedCaptcha = false;
+  let activeProfile = null;
+  let isObserverActive = false;
 
-  function getProfile(callback) {
+  function loadProfile(callback) {
     chrome.storage.local.get(['userProfile'], (res) => {
-      callback(res && res.userProfile ? res.userProfile : null);
+      activeProfile = res && res.userProfile ? res.userProfile : null;
+      if (callback) callback(activeProfile);
     });
   }
+
+  chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === 'local' && changes.userProfile) {
+      activeProfile = changes.userProfile.newValue;
+    }
+  });
 
   function setSelectValue(selectEl, value) {
     if (!selectEl || !value) return false;
@@ -36,7 +45,7 @@
     }
 
     if (!matchedOption) {
-      const tokens = targetVal.split(/\\s+/).filter(t => t.length > 2);
+      const tokens = targetVal.split(/\s+/).filter(t => t.length > 2);
       for (const option of selectEl.options) {
         const optText = (option.textContent || '').toLowerCase().trim();
         if (tokens.some(t => optText.includes(t))) {
@@ -84,9 +93,10 @@
   }
 
   function handleRadioGroups(container, profile) {
-    if (!container || !profile) return 0;
+    const prof = profile || activeProfile;
+    if (!container || !prof) return 0;
     let count = 0;
-    const userCity = (profile.personal?.city || '').toLowerCase().trim();
+    const userCity = (prof.personal?.city || '').toLowerCase().trim();
 
     const groups = container.querySelectorAll('fieldset, [role="radiogroup"], .ia-Questions-item, div[class*="Question"]');
     groups.forEach(group => {
@@ -119,8 +129,8 @@
       }
 
       // 3. Screening QA Bank keywords
-      if (!targetRadio && profile.screening && Array.isArray(profile.screening)) {
-        for (const item of profile.screening) {
+      if (!targetRadio && prof.screening && Array.isArray(prof.screening)) {
+        for (const item of prof.screening) {
           if (!item.keywords || !item.answer) continue;
           const kws = item.keywords.toLowerCase().split(/[,/|]/).map(k => k.trim());
           if (kws.some(kw => kw && questionText.includes(kw))) {
@@ -134,7 +144,7 @@
         }
       }
 
-      // 4. Default yes / no fallback
+      // 4. Default yes / no fallback for eligibility
       if (!targetRadio) {
         if (questionText.includes('authorized') || questionText.includes('eligible') || questionText.includes('background check') || questionText.includes('18 years')) {
           targetRadio = radios.find(r => getRadioLabelText(r, group).includes('yes'));
@@ -170,6 +180,13 @@
     if (cards.length === 0) return false;
 
     let targetCard = cards[0];
+    const prof = profile || activeProfile;
+    const targetName = (prof?.autoApplierSettings?.targetResumeName || prof?.work?.targetRole?.targetResumeName || '').toLowerCase().trim();
+    if (targetName) {
+      const found = cards.find(c => (c.textContent || '').toLowerCase().includes(targetName));
+      if (found) targetCard = found;
+    }
+
     const isSelected = targetCard.classList.contains('selected') ||
                        targetCard.getAttribute('aria-checked') === 'true' ||
                        targetCard.getAttribute('aria-selected') === 'true';
@@ -221,14 +238,58 @@
     return false;
   }
 
+    // Auto-learn user responses when they manually fill/edit application inputs
+  function attachAutoLearnListeners(container, profile) {
+    if (!container) return;
+    const inputs = container.querySelectorAll('input, textarea, select');
+    inputs.forEach(el => {
+      if (el._autoLearnBound) return;
+      el._autoLearnBound = true;
+      el.addEventListener('change', () => {
+        const val = (el.value || '').trim();
+        if (!val || val.length < 2) return;
+
+        let qText = '';
+        const parentQuestion = el.closest('.ia-Questions-item, fieldset, div[class*="Question"], div[class*="FormGroup"]');
+        if (parentQuestion) {
+          const header = parentQuestion.querySelector('legend, h1, h2, h3, h4, label, [class*="label"], [class*="title"], p');
+          if (header) qText = header.textContent.trim();
+        }
+        if (!qText && el.id) {
+          const lbl = container.querySelector(`label[for="${el.id}"]`);
+          if (lbl) qText = lbl.textContent.trim();
+        }
+
+        if (qText && qText.length > 5) {
+          chrome.storage.local.get(['userProfile'], (res) => {
+            const p = res?.userProfile || profile || activeProfile || {};
+            if (!p.screening) p.screening = [];
+            const cleanQ = qText.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+            const exists = p.screening.some(item => item.keywords && cleanQ.includes(item.keywords.toLowerCase()));
+            if (!exists) {
+              const keywords = cleanQ.split(' ').filter(w => w.length > 3).slice(0, 4).join(', ');
+              if (keywords) {
+                p.screening.push({ keywords, answer: val });
+                chrome.storage.local.set({ userProfile: p });
+                console.log(`[Indeed Auto-Applier] Auto-learned QA pair: "${keywords}" -> "${val}"`);
+              }
+            }
+          });
+        }
+      });
+    });
+  }
+
   function fillCurrentStep(profile) {
+    const prof = profile || activeProfile;
     const container = window.SpeedFillMatcher?.getAppContainer() || document.querySelector('[data-testid="ia-container"], #ia-container, div[role="dialog"]');
-    if (!container) return { filled: 0, containerFound: false };
+    if (!container || !prof) return { filled: 0, containerFound: false };
 
     let filled = 0;
 
-    handleResume(container, profile);
-    filled += handleRadioGroups(container, profile);
+    handleResume(container, prof);
+    attachAutoLearnListeners(container, prof);
+    filled += handleRadioGroups(container, prof);
 
     const inputs = container.querySelectorAll('input[type="text"], input[type="email"], input[type="tel"], input[type="number"], input:not([type]), textarea');
     inputs.forEach(input => {
@@ -236,7 +297,7 @@
       if (input.disabled || input.readOnly) return;
       if (window.SpeedFillMatcher?.isNonApplicationInput(input)) return;
 
-      const match = window.SpeedFillMatcher?.matchField(input, profile);
+      const match = window.SpeedFillMatcher?.matchField(input, prof);
       if (match && match.value) {
         const ok = window.SpeedFillMatcher.setNativeInputValue(input, match.value);
         if (ok) filled++;
@@ -249,7 +310,7 @@
       if (select.disabled) return;
       if (window.SpeedFillMatcher?.isNonApplicationInput(select)) return;
 
-      const match = window.SpeedFillMatcher?.matchField(select, profile);
+      const match = window.SpeedFillMatcher?.matchField(select, prof);
       if (match && match.value) {
         const ok = setSelectValue(select, match.value);
         if (ok) filled++;
@@ -267,7 +328,7 @@
       if (b.offsetWidth === 0 && b.offsetHeight === 0) return false;
       if (b.disabled || b.getAttribute('aria-disabled') === 'true') return false;
       const t = (b.textContent || b.value || '').toLowerCase().trim();
-      return t === 'submit your application' || t.includes('submit application') || t === 'submit' || t === 'apply now';
+      return t === 'submit your application' || t.includes('submit application') || t === 'submit';
     });
 
     if (submitBtn) {
@@ -297,13 +358,37 @@
     if (closeBtn) closeBtn.click();
   }
 
+  // Setup autonomous MutationObserver to fill forms even if opened in iframe / separate flow
+  function setupDOMObserver() {
+    if (isObserverActive) return;
+
+    const observer = new MutationObserver(() => {
+      const container = window.SpeedFillMatcher?.getAppContainer() || document.querySelector('[data-testid="ia-container"], #ia-container');
+      if (container && activeProfile) {
+        clearTimeout(window._autoFillDebounceTimer);
+        window._autoFillDebounceTimer = setTimeout(() => {
+          fillCurrentStep(activeProfile);
+        }, 300);
+      }
+    });
+
+    if (document.body) {
+      observer.observe(document.body, { childList: true, subtree: true });
+      isObserverActive = true;
+    }
+  }
+
+  loadProfile(() => {
+    setupDOMObserver();
+  });
+
   window.IndeedAutoFormFiller = {
     fillCurrentStep,
     advanceOrSubmit,
     checkCaptcha,
     isApplicationSubmitted,
     closeModal,
-    getProfile
+    loadProfile
   };
 
   console.log('[Indeed Auto-Applier] Form Filler engine loaded.');

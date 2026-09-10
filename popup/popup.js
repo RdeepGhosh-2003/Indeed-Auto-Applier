@@ -25,6 +25,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const ruleUnlistedExp = document.getElementById('rule-unlisted-exp');
   const ruleMaxJobs = document.getElementById('rule-max-jobs');
   const ruleDelay = document.getElementById('rule-delay');
+  const ruleBlacklist = document.getElementById('rule-blacklist');
+  const ruleTargetResume = document.getElementById('rule-target-resume');
+  const ruleStrictLocation = document.getElementById('rule-strict-location');
   const btnSaveRules = document.getElementById('btn-save-rules');
 
   const profFullName = document.getElementById('prof-fullname');
@@ -83,13 +86,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     const profile = data.userProfile || {};
     const settings = Object.assign({}, profile.autoApplierSettings || {}, data.autoApplierSettings || {});
 
-    ruleQuery.value = settings.targetJobQuery || profile.work?.targetRole?.jobTitle || 'MIS Analyst';
-    ruleLocation.value = settings.targetLocation || profile.work?.targetRole?.targetLocation || 'Bangalore, Karnataka';
+    ruleQuery.value = settings.targetJobQuery || profile.work?.targetRole?.jobTitle || 'Data Analyst';
+    ruleLocation.value = settings.targetLocation || profile.work?.targetRole?.targetLocation || 'City, State';
     ruleExp.value = settings.userYearsExp !== undefined ? settings.userYearsExp : 1;
     ruleSalary.value = settings.minMonthlySalary || 25000;
-    ruleUnlistedExp.value = settings.unlistedExpAction || 'save';
+    ruleUnlistedExp.value = settings.unlistedExpAction || 'apply';
     ruleMaxJobs.value = settings.maxJobsPerSession || 25;
     ruleDelay.value = settings.stepDelayMs || 1500;
+    ruleBlacklist.value = settings.blacklistKeywords || 'intern, unpaid, bpo, telecaller, faculty, teaching, night shift';
+    ruleTargetResume.value = settings.targetResumeName || '';
+    ruleStrictLocation.checked = settings.strictLocation !== false;
 
     profFullName.value = profile.personal?.fullName || '';
     profPhone.value = profile.personal?.phone || '';
@@ -214,10 +220,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    let csv = 'Title,Company,Location,Salary,Reason,SavedAt,URL\\n';
+    let csv = 'Title,Company,Location,Salary,Reason,SavedAt,URL\n';
     jobs.forEach(j => {
       const escape = (val) => `"${String(val || '').replace(/"/g, '""')}"`;
-      csv += `${escape(j.title)},${escape(j.company)},${escape(j.location)},${escape(j.salary)},${escape(j.reason)},${escape(j.savedAt)},${escape(j.url)}\\n`;
+      csv += `${escape(j.title)},${escape(j.company)},${escape(j.location)},${escape(j.salary)},${escape(j.reason)},${escape(j.savedAt)},${escape(j.url)}\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -243,13 +249,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   btnStart.addEventListener('click', async () => {
     const customSettings = {
-      targetJobQuery: ruleQuery.value.trim() || 'MIS Analyst',
-      targetLocation: ruleLocation.value.trim() || 'Bangalore, Karnataka',
+      targetJobQuery: ruleQuery.value.trim() || 'Data Analyst',
+      targetLocation: ruleLocation.value.trim() || 'City, State',
       userYearsExp: parseFloat(ruleExp.value) || 1,
       minMonthlySalary: parseInt(ruleSalary.value, 10) || 25000,
       unlistedExpAction: ruleUnlistedExp.value,
       maxJobsPerSession: parseInt(ruleMaxJobs.value, 10) || 25,
-      stepDelayMs: parseInt(ruleDelay.value, 10) || 1500
+      stepDelayMs: parseInt(ruleDelay.value, 10) || 1500,
+      blacklistKeywords: ruleBlacklist.value.trim(),
+      targetResumeName: ruleTargetResume.value.trim(),
+      strictLocation: ruleStrictLocation.checked
     };
 
     await chrome.storage.local.set({ autoApplierSettings: customSettings });
@@ -287,7 +296,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       minMonthlySalary: parseInt(ruleSalary.value, 10) || 25000,
       unlistedExpAction: ruleUnlistedExp.value,
       maxJobsPerSession: parseInt(ruleMaxJobs.value, 10) || 25,
-      stepDelayMs: parseInt(ruleDelay.value, 10) || 1500
+      stepDelayMs: parseInt(ruleDelay.value, 10) || 1500,
+      blacklistKeywords: ruleBlacklist.value.trim(),
+      targetResumeName: ruleTargetResume.value.trim(),
+      strictLocation: ruleStrictLocation.checked
     };
 
     await chrome.storage.local.set({ autoApplierSettings: updated });

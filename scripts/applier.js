@@ -13,9 +13,56 @@
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  // Human-like timing jitter (base delay +/- random milliseconds)
+  function humanDelay(baseMs = 1500) {
+    const jitter = Math.floor(Math.random() * 600) - 200;
+    return sleep(Math.max(800, baseMs + jitter));
+  }
+
+  // Floating in-page status pill
+  function updateFloatingPill(text, isDone = false) {
+    let pill = document.getElementById('indeed-auto-applier-pill');
+    if (!pill) {
+      pill = document.createElement('div');
+      pill.id = 'indeed-auto-applier-pill';
+      pill.innerHTML = `
+        <div style="position: fixed; bottom: 20px; right: 20px; z-index: 2147483647; background: #0f172a; color: #f8fafc; border: 1px solid #3b82f6; box-shadow: 0 10px 25px rgba(0,0,0,0.5); border-radius: 30px; padding: 8px 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 10px; cursor: default;">
+          <span id="pill-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #10b981; box-shadow: 0 0 8px #10b981; display: inline-block;"></span>
+          <span id="pill-text">${text}</span>
+          <button id="pill-stop-btn" style="background: #ef4444; color: white; border: none; border-radius: 12px; padding: 4px 10px; font-size: 11px; font-weight: 700; cursor: pointer;">⏹ Stop</button>
+        </div>
+      `;
+      document.body.appendChild(pill);
+      pill.querySelector('#pill-stop-btn').addEventListener('click', () => {
+        chrome.runtime.sendMessage({ action: 'STOP_AUTO_APPLY' });
+        pill.remove();
+      });
+    }
+
+    const pillText = pill.querySelector('#pill-text');
+    if (pillText) pillText.textContent = text;
+
+    if (isDone) {
+      const dot = pill.querySelector('#pill-dot');
+      if (dot) { dot.style.background = '#3b82f6'; dot.style.boxShadow = 'none'; }
+      const btn = pill.querySelector('#pill-stop-btn');
+      if (btn) {
+        btn.textContent = '✕ Close';
+        btn.style.background = '#475569';
+        btn.onclick = () => pill.remove();
+      }
+    }
+  }
+
+  function removeFloatingPill() {
+    const pill = document.getElementById('indeed-auto-applier-pill');
+    if (pill) pill.remove();
+  }
+
   function log(message, type = 'info') {
     console.log(`[Auto-Applier] ${message}`);
     chrome.runtime.sendMessage({ action: 'APPEND_LOG', message, logType: type }).catch(() => {});
+    if (isRunning) updateFloatingPill(message.slice(0, 50));
   }
 
   // Helper to trigger realistic click on React elements
@@ -37,7 +84,7 @@
     const lower = salaryStr.toLowerCase().replace(/,/g, '');
 
     if (lower.includes('₹') || lower.includes('inr') || lower.includes('rs')) {
-      const nums = lower.match(/\\d+/g);
+      const nums = lower.match(/\d+/g);
       if (!nums || nums.length === 0) return null;
 
       const parsedVals = nums.map(n => parseInt(n, 10)).filter(n => !isNaN(n) && n > 100);
@@ -75,23 +122,24 @@
     return null;
   }
 
-  // Parse experience requirement from text
+  // Parse experience requirement from text (normalizes unicode dashes and whitespace)
   function parseExperienceRequirement(title, description) {
-    const fullText = `${title} \\n ${description}`.toLowerCase();
+    let fullText = `${title} \n ${description}`.toLowerCase();
+    fullText = fullText.replace(/[\u2010-\u2015\u2212\u2013\u2014]/g, '-');
 
     // 1. Fresher / 0 years indicators
-    if (/\\b(fresher|entry level|intern|trainee|0\\s*-\\s*1\\s*(?:years?|yrs?)|0\\s*-\\s*2\\s*(?:years?|yrs?)|no experience required|freshers(?:\s+are)?\s+welcome)\\b/i.test(fullText)) {
+    if (/\b(fresher|entry level|intern|trainee|0\s*-\s*1\s*(?:years?|yrs?)|0\s*-\s*2\s*(?:years?|yrs?)|no experience required|freshers(?:\s+are)?\s+welcome)\b/i.test(fullText)) {
       return 0;
     }
 
     // 2. Explicit patterns for required experience
     const expPatterns = [
-      /(?:experience|exp)\\s*(?:required|needed|mandatory)?\\s*[:\\-]?\\s*(\\d+(?:\\.\\d+)?)\\s*(?:to|-|\\+)?\\s*(\\d+(?:\\.\\d+)?)?\\s*(?:years?|yrs?)/i,
-      /(\\d+(?:\\.\\d+)?)\\s*(?:to|-)\\s*(\\d+(?:\\.\\d+)?)\\s*(?:years?|yrs?)(?:\\s+(?:of\\s+)?(?:relevant\\s+)?experience)?/i,
-      /(\\d+(?:\\.\\d+)?)\\s*\\+\\s*(?:years?|yrs?)(?:\\s+(?:of\\s+)?(?:relevant\\s+)?experience)/i,
-      /(\\d+(?:\\.\\d+)?)\\s*(?:years?|yrs?)\\s+(?:of\\s+)?(?:relevant\\s+)?experience/i,
-      /minimum\\s*(?:of\\s*)?(\\d+(?:\\.\\d+)?)\\s*(?:years?|yrs?)/i,
-      /at least\\s*(\\d+(?:\\.\\d+)?)\\s*(?:years?|yrs?)/i
+      /(?:experience|exp)\s*(?:required|needed|mandatory)?\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(?:to|-|\+)?\s*(\d+(?:\.\d+)?)?\s*(?:years?|yrs?)/i,
+      /(\d+(?:\.\d+)?)\s*(?:to|-)\s*(\d+(?:\.\d+)?)\s*(?:years?|yrs?)(?:\s+(?:of\s+)?(?:relevant\s+)?experience)?/i,
+      /(\d+(?:\.\d+)?)\s*\+\s*(?:years?|yrs?)(?:\s+(?:of\s+)?(?:relevant\s+)?experience)/i,
+      /(\d+(?:\.\d+)?)\s*(?:years?|yrs?)\s+(?:of\s+)?(?:relevant\s+)?experience/i,
+      /minimum\s*(?:of\s*)?(\d+(?:\.\d+)?)\s*(?:years?|yrs?)/i,
+      /at least\s*(\d+(?:\.\d+)?)\s*(?:years?|yrs?)/i
     ];
 
     for (const pat of expPatterns) {
@@ -105,8 +153,8 @@
     }
 
     // 3. Senior role title hints
-    if (/\\b(senior|sr\\.|lead|manager|principal|architect|head of)\\b/i.test(title)) {
-      if (!/\\b(executive|assistant|junior|jr\\.|trainee|associate)\\b/i.test(title)) {
+    if (/\b(senior|sr\.|lead|manager|principal|architect|head of)\b/i.test(title)) {
+      if (!/\b(executive|assistant|junior|jr\.|trainee|associate)\b/i.test(title)) {
         return 4;
       }
     }
@@ -131,8 +179,8 @@
     }
 
     const indeedByText = allClickables.find(el => {
-      const txt = (el.textContent || el.value || '').toLowerCase().replace(/\\s+/g, ' ').trim();
-      const aria = (el.getAttribute('aria-label') || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+      const txt = (el.textContent || el.value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+      const aria = (el.getAttribute('aria-label') || '').toLowerCase().replace(/\s+/g, ' ').trim();
       return txt.includes('apply with indeed') || aria.includes('apply with indeed') ||
              txt === 'easily apply' || aria.includes('easily apply') ||
              txt === 'apply now' || aria.includes('apply now');
@@ -153,8 +201,8 @@
     }
 
     const companyByText = allClickables.find(el => {
-      const txt = (el.textContent || el.value || '').toLowerCase().replace(/\\s+/g, ' ').trim();
-      const aria = (el.getAttribute('aria-label') || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+      const txt = (el.textContent || el.value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+      const aria = (el.getAttribute('aria-label') || '').toLowerCase().replace(/\s+/g, ' ').trim();
       return txt.includes('apply on company site') || aria.includes('apply on company site') ||
              txt.includes('apply on employer site') || aria.includes('apply on employer site') ||
              txt.includes('apply on company website');
@@ -211,7 +259,7 @@
       const fillRes = window.IndeedAutoFormFiller?.fillCurrentStep(profile);
       log(`Step ${stepCount}: Auto-filled ${fillRes?.filled || 0} fields.`, 'info');
 
-      await sleep(settings?.stepDelayMs || 1200);
+      await humanDelay(settings?.stepDelayMs || 1200);
 
       const advRes = window.IndeedAutoFormFiller?.advanceOrSubmit();
       if (advRes?.action === 'submitted') {
@@ -282,13 +330,55 @@
     const company = companyEl ? companyEl.textContent.trim() : 'Unknown Company';
     const location = locationEl ? locationEl.textContent.trim() : 'Unknown Location';
     const salaryText = salaryEl ? salaryEl.textContent.trim() : '';
-    const description = descEl ? descEl.textContent.trim() : '';
+    
+    // Read the ENTIRE job details pane (captures tags like Fresher, full description, etc. regardless of scroll position)
+    const paneText = viewPane ? (viewPane.innerText || viewPane.textContent || '') : '';
+    const descText = descEl ? (descEl.innerText || descEl.textContent || '') : '';
+    const description = `${paneText}\n${descText}`.trim();
     const jobUrl = window.location.href;
 
     log(`🔍 Inspecting: "${jobTitle}" at "${company}" (${location})`, 'info');
+    // 0. Blacklist / Negative Keywords Check
+    const blacklistStr = settings?.blacklistKeywords || 'intern, unpaid, bpo, telecaller, faculty, teaching, night shift';
+    const blacklistTokens = blacklistStr.toLowerCase().split(/[,|]/).map(t => t.trim()).filter(t => t.length > 1);
+    const fullTextLower = `${jobTitle} \n ${description}`.toLowerCase();
+
+    const matchedBlacklist = blacklistTokens.find(token => token && fullTextLower.includes(token));
+    if (matchedBlacklist) {
+      log(`⏭️ Skipped: "${jobTitle}" matches blacklist keyword "${matchedBlacklist}".`, 'info');
+      chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1 } }).catch(() => {});
+      card.style.border = originalBorder;
+      return 'skipped_blacklist';
+    }
+
+    // 0.1 Strict Location Filter (Target City + Remote Only)
+    if (settings?.strictLocation !== false) {
+      const locLower = location.toLowerCase();
+      const rawTarget = (settings?.targetLocation || '').toLowerCase().trim();
+      const targetTokens = rawTarget.split(/[,|]/).map(t => t.trim()).filter(t => t.length > 2);
+      const isRemote = locLower.includes('remote') || fullTextLower.includes('remote') || fullTextLower.includes('work from home');
+      
+      let isCityMatch = targetTokens.length === 0;
+      if (!isCityMatch) {
+        isCityMatch = targetTokens.some(t => {
+          if (t === 'bangalore' || t === 'bengaluru') {
+            return locLower.includes('bangalore') || locLower.includes('bengaluru');
+          }
+          return locLower.includes(t);
+        });
+      }
+
+      if (!isRemote && !isCityMatch) {
+        log(`⏭️ Skipped: "${jobTitle}" at "${location}" is outside target location and not Remote.`, 'info');
+        chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1 } }).catch(() => {});
+        card.style.border = originalBorder;
+        return 'skipped_location';
+      }
+    }
+
 
     // 1. Salary Check: if job provides salary, only skip if even its UPPER limit is below our floor
-    const minSalaryFloor = settings?.minMonthlySalary || 25000;
+    const minSalaryFloor = settings?.minMonthlySalary !== undefined ? settings.minMonthlySalary : 25000;
     const sal = parseMonthlySalary(salaryText);
     if (sal) {
       if (sal.maxMonthly < minSalaryFloor) {
@@ -303,50 +393,49 @@
     const userExp = settings?.userYearsExp !== undefined ? settings.userYearsExp : 1;
     const reqExp = parseExperienceRequirement(jobTitle, description);
 
-    // Case: No experience mentioned
-    if (reqExp === null) {
-      const action = settings?.unlistedExpAction || 'save';
-      if (action === 'save') {
-        log(`📋 No experience requirement listed for "${jobTitle}" — Saving for manual review.`, 'info');
-        chrome.runtime.sendMessage({
-          action: 'SAVE_JOB',
-          job: { jk, title: jobTitle, company, location, salary: salaryText, url: jobUrl, reason: 'No Experience Listed' }
-        }).catch(() => {});
-      } else {
-        log(`⏭️ Skipped: No experience requirement listed for "${jobTitle}".`, 'info');
-        chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1 } }).catch(() => {});
-      }
-      card.style.border = originalBorder;
-      return 'saved_no_exp';
-    }
-
-    // Case: Experience exceeds user experience
-    if (reqExp > userExp) {
-      log(`⏭️ Skipped: "${jobTitle}" requires ${reqExp}+ years of experience (Your profile: ${userExp} year).`, 'info');
+    // If experience is explicitly required and exceeds user experience -> SKIP!
+    if (reqExp !== null && reqExp > userExp) {
+      log(`⏭️ Skipped: "${jobTitle}" requires ${reqExp}+ years of experience (Your profile: ${userExp} yr).`, 'info');
       chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1 } }).catch(() => {});
       card.style.border = originalBorder;
       return 'skipped_experience';
     }
 
-    // Case: Experience matches!
-    log(`🎯 Experience match (${reqExp} <= ${userExp} yr) for "${jobTitle}"! Checking apply type...`, 'success');
+    // If experience is unlisted and user explicitly requested to skip
+    if (reqExp === null && settings?.unlistedExpAction === 'skip') {
+      log(`⏭️ Skipped: "${jobTitle}" has no experience requirement listed (Policy: Skip).`, 'info');
+      chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1 } }).catch(() => {});
+      card.style.border = originalBorder;
+      return 'skipped_unlisted_exp';
+    }
+
+    // 3. Seniority Check
+    if (/\b(senior|sr\.|lead|manager|principal|architect|director|head of)\b/i.test(jobTitle) &&
+        !/\b(executive|assistant|junior|jr\.|trainee|associate)\b/i.test(jobTitle)) {
+      log(`⏭️ Skipped: "${jobTitle}" is a senior/managerial role.`, 'info');
+      chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1 } }).catch(() => {});
+      card.style.border = originalBorder;
+      return 'skipped_senior';
+    }
+
+    // 4. Criteria matches! Inspect apply button
+    log(`🎯 Criteria matched for "${jobTitle}"! Checking apply type...`, 'success');
 
     const applyInfo = inspectApplyButton(viewPane);
 
-    // Subcase: Apply on Company Website
-    if (applyInfo.type === 'company_site') {
-      log(`📋 Job directs to external company website — Saving to your list.`, 'info');
-      chrome.runtime.sendMessage({
-        action: 'SAVE_JOB',
-        job: { jk, title: jobTitle, company, location, salary: salaryText, url: applyInfo.url || jobUrl, reason: 'Company Website' }
-      }).catch(() => {});
-      card.style.border = originalBorder;
-      return 'saved_company_site';
-    }
-
-    // Subcase: Indeed Apply
+    // Subcase A: "Apply with Indeed" -> AUTO-APPLY (or save if user specifically asked to review unlisted exp)
     if (applyInfo.type === 'indeed_apply') {
-      log(`🚀 "Apply with Indeed" found! Triggering application...`, 'info');
+      if (reqExp === null && settings?.unlistedExpAction === 'save') {
+        log(`📋 Experience unlisted: Saving "${jobTitle}" for manual review as configured.`, 'info');
+        chrome.runtime.sendMessage({
+          action: 'SAVE_JOB',
+          job: { jk, title: jobTitle, company, location, salary: salaryText, url: jobUrl, reason: 'Unlisted Experience (Manual Review)' }
+        }).catch(() => {});
+        card.style.border = originalBorder;
+        return 'saved_unlisted_exp';
+      }
+
+      log(`🚀 "Apply with Indeed" found! Triggering application for "${jobTitle}"...`, 'info');
       triggerClick(applyInfo.element);
 
       const result = await executeIndeedApplication(profile, settings);
@@ -362,14 +451,22 @@
       return result.success ? 'applied' : 'apply_failed';
     }
 
-    // Unknown apply type fallback
-    log(`📋 Unable to determine apply button type for "${jobTitle}" — Saving for manual apply.`, 'info');
-    chrome.runtime.sendMessage({
-      action: 'SAVE_JOB',
-      job: { jk, title: jobTitle, company, location, salary: salaryText, url: jobUrl, reason: 'Unknown Apply Method' }
-    }).catch(() => {});
+    // Subcase B: "Apply on Company Site" -> SAVE ONLY BECAUSE CRITERIA FITS!
+    if (applyInfo.type === 'company_site') {
+      log(`📋 Criteria matched! Saving company site job: "${jobTitle}" at "${company}".`, 'info');
+      chrome.runtime.sendMessage({
+        action: 'SAVE_JOB',
+        job: { jk, title: jobTitle, company, location, salary: salaryText, url: applyInfo.url || jobUrl, reason: 'Criteria Matched (Company Site)' }
+      }).catch(() => {});
+      card.style.border = originalBorder;
+      return 'saved_company_site';
+    }
+
+    // Subcase C: Unrecognized / expired apply button -> SKIP (do not keep saving unknown jobs)
+    log(`⏭️ Skipped: Unrecognized or inactive apply button for "${jobTitle}".`, 'info');
+    chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1 } }).catch(() => {});
     card.style.border = originalBorder;
-    return 'saved_unknown';
+    return 'skipped_unrecognized';
   }
 
   async function navigateToNextPage() {
@@ -409,6 +506,7 @@
         if (totalProcessed >= maxJobs || currentStats.scanned >= (maxJobs * 3)) {
           log(`🎯 Session goal reached (${totalProcessed} jobs processed).`, 'success');
           chrome.runtime.sendMessage({ action: 'SESSION_COMPLETED', summary: currentStats }).catch(() => {});
+          updateFloatingPill('🎉 Completed 25 jobs!', true);
           break;
         }
 
@@ -442,7 +540,7 @@
           const status = await processJobCard(card, profile, settings);
           if (status !== 'already_processed') {
             processedAnyOnPage = true;
-            await sleep(settings.stepDelayMs || 1500);
+            await humanDelay(settings.stepDelayMs || 1500);
           }
         }
 
@@ -468,6 +566,7 @@
     if (request.action === 'HALT_SESSION') {
       isHalted = true;
       isRunning = false;
+      removeFloatingPill();
       log('Session halted by user request.', 'warning');
       sendResponse({ status: 'halted' });
       return true;

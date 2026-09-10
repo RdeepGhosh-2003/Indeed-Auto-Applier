@@ -94,11 +94,11 @@
           <h3 class="card-title">🔍 Search Target</h3>
           <div class="form-group">
             <label for="rule-query">Target Job Title / Keywords</label>
-            <input type="text" id="rule-query" placeholder="e.g. MIS Analyst, Data Analyst">
+            <input type="text" id="rule-query" placeholder="e.g. Software Engineer, Data Analyst">
           </div>
           <div class="form-group">
             <label for="rule-location">Target Location</label>
-            <input type="text" id="rule-location" placeholder="e.g. Bangalore, Karnataka">
+            <input type="text" id="rule-location" placeholder="e.g. Remote, Bangalore, New York">
           </div>
         </div>
 
@@ -112,7 +112,7 @@
             </div>
             <div class="form-group">
               <label for="rule-salary">Minimum Salary Floor (₹/month)</label>
-              <input type="number" id="rule-salary" value="25000" min="0" step="1000">
+              <input type="number" id="rule-salary" value="25000" min="0" step="1000" placeholder="e.g. 25000">
               <small class="hint">Jobs offering less than this will be skipped.</small>
             </div>
           </div>
@@ -120,10 +120,30 @@
           <div class="form-group">
             <label for="rule-unlisted-exp">If Job Has No Experience Listed:</label>
             <select id="rule-unlisted-exp">
-              <option value="save" selected>Save to List for Manual Review (Recommended)</option>
-              <option value="apply">Attempt Auto-Apply</option>
+              <option value="apply" selected>Auto-Apply if Indeed Apply / Save if Company Site (Recommended)</option>
+              <option value="save">Always Save to List (Manual Review)</option>
               <option value="skip">Skip Job</option>
             </select>
+          </div>
+
+          <div class="form-group">
+            <label for="rule-blacklist">Negative Keywords / Blacklist (Skip instantly)</label>
+            <input type="text" id="rule-blacklist" placeholder="e.g. intern, unpaid, bpo, telecaller, faculty, teaching, night shift">
+            <small class="hint">Jobs matching any of these words in title or description will be skipped.</small>
+          </div>
+
+          <div class="form-group">
+            <label for="rule-target-resume">Target Resume Name (Optional)</label>
+            <input type="text" id="rule-target-resume" placeholder="e.g. MIS Analyst Resume, Data Analyst">
+            <small class="hint">Prioritizes this uploaded resume on Indeed if multiple exist.</small>
+          </div>
+
+          <div class="form-group">
+            <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-top: 4px;">
+              <input type="checkbox" id="rule-strict-location" checked style="width: 16px; height: 16px; accent-color: #2563eb; cursor: pointer;">
+              <span>Strict Location Match (Target City + Remote Only)</span>
+            </label>
+            <small class="hint" style="margin-left: 24px;">Skips jobs in other states/cities unless explicitly marked 'Remote'.</small>
           </div>
 
           <div class="form-row">
@@ -175,7 +195,7 @@
             </div>
             <div class="form-group">
               <label for="prof-city">City, State</label>
-              <input type="text" id="prof-city" placeholder="Bangalore, Karnataka">
+              <input type="text" id="prof-city" placeholder="e.g. City, State">
             </div>
           </div>
         </div>
@@ -185,11 +205,11 @@
           <div class="form-row">
             <div class="form-group">
               <label for="prof-curr-title">Current Job Title</label>
-              <input type="text" id="prof-curr-title" placeholder="MIS Analyst">
+              <input type="text" id="prof-curr-title" placeholder="e.g. Analyst, Engineer">
             </div>
             <div class="form-group">
               <label for="prof-curr-company">Current Company</label>
-              <input type="text" id="prof-curr-company" placeholder="Company Name">
+              <input type="text" id="prof-curr-company" placeholder="Current Employer / Company Name">
             </div>
           </div>
           <div class="form-row">
