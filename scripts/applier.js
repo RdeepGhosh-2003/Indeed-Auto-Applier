@@ -20,12 +20,13 @@
     try {
       const data = await chrome.storage.local.get(['autoApplySession']);
       const list = data?.autoApplySession?.processedJks || [];
+      processedJks.clear();
       list.forEach(jk => processedJks.add(jk));
     } catch (_) {}
   }
 
   async function persistProcessedJk(jk) {
-    await persistProcessedJk(jk);
+    processedJks.add(jk);
     try {
       const data = await chrome.storage.local.get(['autoApplySession']);
       if (data?.autoApplySession) {
@@ -564,10 +565,10 @@
   async function navigateToNextPage() {
     log('Searching for Next Page of job results...', 'info');
     const nextBtn = document.querySelector(
-      'a[data-testid="pagination-page-next"], nav[role="navigation"] a[aria-label="Next Page"], a[aria-label="Next"], a.pn[aria-label*="Next"]'
+      'a[data-testid="pagination-page-next"], button[data-testid="pagination-page-next"], [data-testid="pagination-page-next"], nav[role="navigation"] a[aria-label*="Next" i], nav[role="navigation"] button[aria-label*="Next" i], a[aria-label="Next Page"], button[aria-label="Next Page"], a[aria-label="Next"], button[aria-label="Next"], a.pn[aria-label*="Next" i]'
     );
 
-    if (nextBtn && nextBtn.href) {
+    if (nextBtn) {
       log('Navigating to next page of results...', 'info');
       triggerClick(nextBtn);
       await sleep(4000);

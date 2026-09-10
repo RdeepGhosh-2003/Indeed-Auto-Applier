@@ -149,7 +149,8 @@ async function handleStartAutoApply(customSettings) {
     isRunning: true,
     startTime: Date.now(),
     settings: settings,
-    stats: { scanned: 0, applied: 0, saved: 0, skipped: 0 }
+    stats: { scanned: 0, applied: 0, saved: 0, skipped: 0 },
+    processedJks: []
   };
 
   await chrome.storage.local.set({
