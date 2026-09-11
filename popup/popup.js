@@ -26,8 +26,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   const ruleMaxJobs = document.getElementById('rule-max-jobs');
   const ruleDelay = document.getElementById('rule-delay');
   const ruleBlacklist = document.getElementById('rule-blacklist');
+  const ruleCompanyBlacklist = document.getElementById('rule-company-blacklist');
   const ruleTargetResume = document.getElementById('rule-target-resume');
   const ruleStrictLocation = document.getElementById('rule-strict-location');
+  const ruleEasyApplyOnly = document.getElementById('rule-easy-apply-only');
   const btnSaveRules = document.getElementById('btn-save-rules');
 
   const profFullName = document.getElementById('prof-fullname');
@@ -40,11 +42,33 @@ document.addEventListener('DOMContentLoaded', async () => {
   const profNotice = document.getElementById('prof-notice');
   const btnSaveProfile = document.getElementById('btn-save-profile');
 
+  // Screening Q&A Bank elements
+  const qaListContainer = document.getElementById('qa-list-container');
+  const btnOpenAddQa = document.getElementById('btn-open-add-qa');
+  const qaFormContainer = document.getElementById('qa-form-container');
+  const qaFormTitle = document.getElementById('qa-form-title');
+  const qaEditIndex = document.getElementById('qa-edit-index');
+  const qaInputKeywords = document.getElementById('qa-input-keywords');
+  const qaInputAnswer = document.getElementById('qa-input-answer');
+  const btnCancelQa = document.getElementById('btn-cancel-qa');
+  const btnSaveQa = document.getElementById('btn-save-qa');
+
+  // Saved & Applied Jobs elements
+  const viewSavedBtn = document.getElementById('view-saved-btn');
+  const viewAppliedBtn = document.getElementById('view-applied-btn');
+  const savedSubview = document.getElementById('saved-subview');
+  const appliedSubview = document.getElementById('applied-subview');
   const savedJobsContainer = document.getElementById('saved-jobs-container');
+  const appliedJobsContainer = document.getElementById('applied-jobs-container');
   const savedCountBadge = document.getElementById('saved-count-badge');
+  const savedTabCount = document.getElementById('saved-tab-count');
+  const appliedTabCount = document.getElementById('applied-tab-count');
   const savedSearchInput = document.getElementById('saved-search-input');
+  const appliedSearchInput = document.getElementById('applied-search-input');
   const btnExportSaved = document.getElementById('btn-export-saved');
   const btnClearSaved = document.getElementById('btn-clear-saved');
+  const btnExportApplied = document.getElementById('btn-export-applied');
+  const btnClearApplied = document.getElementById('btn-clear-applied');
 
   // Logs / Historical Analytics elements
   const logsPeriodBtns = document.querySelectorAll('.period-btn');
@@ -112,7 +136,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       'autoApplierSettings',
       'autoApplySession',
       'sessionLogs',
-      'savedJobs'
+      'savedJobs',
+      'appliedJobs'
     ]);
 
     const profile = data.userProfile || {};
@@ -126,8 +151,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     ruleMaxJobs.value = settings.maxJobsPerSession || 25;
     ruleDelay.value = settings.stepDelayMs || 1500;
     ruleBlacklist.value = settings.blacklistKeywords || 'intern, unpaid, bpo, telecaller, faculty, teaching, night shift';
+    if (ruleCompanyBlacklist) ruleCompanyBlacklist.value = settings.blockedCompanies || '';
     ruleTargetResume.value = settings.targetResumeName || '';
     ruleStrictLocation.checked = settings.strictLocation !== false;
+    if (ruleEasyApplyOnly) ruleEasyApplyOnly.checked = !!settings.easyApplyOnly;
 
     profFullName.value = profile.personal?.fullName || '';
     profPhone.value = profile.personal?.phone || '';
@@ -147,6 +174,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     renderSavedJobs(data.savedJobs || []);
+    renderAppliedJobs(data.appliedJobs || []);
+    renderQaBank(profile.screening || []);
     await renderAnalytics(currentLogsPeriod);
   }
 
@@ -185,11 +214,38 @@ document.addEventListener('DOMContentLoaded', async () => {
     consoleLogs.scrollTop = consoleLogs.scrollHeight;
   }
 
-  function renderSavedJobs(jobs) {
-    savedJobsContainer.innerHTML = '';
-    savedCountBadge.textContent = jobs.length;
+  async function updateNavBadge() {
+    const data = await chrome.storage.local.get(['savedJobs', 'appliedJobs']);
+    const savedLen = (data.savedJobs || []).length;
+    const appliedLen = (data.appliedJobs || []).length;
+    if (savedCountBadge) savedCountBadge.textContent = `${savedLen} / ${appliedLen}`;
+    if (savedTabCount) savedTabCount.textContent = savedLen;
+    if (appliedTabCount) appliedTabCount.textContent = appliedLen;
+  }
 
-    const query = (savedSearchInput.value || '').toLowerCase().trim();
+  // Segmented control tabs in Saved & Applied
+  if (viewSavedBtn && viewAppliedBtn) {
+    viewSavedBtn.addEventListener('click', () => {
+      viewSavedBtn.classList.add('active');
+      viewAppliedBtn.classList.remove('active');
+      if (savedSubview) savedSubview.style.display = 'block';
+      if (appliedSubview) appliedSubview.style.display = 'none';
+    });
+
+    viewAppliedBtn.addEventListener('click', () => {
+      viewAppliedBtn.classList.add('active');
+      viewSavedBtn.classList.remove('active');
+      if (appliedSubview) appliedSubview.style.display = 'block';
+      if (savedSubview) savedSubview.style.display = 'none';
+    });
+  }
+
+  function renderSavedJobs(jobs) {
+    if (!savedJobsContainer) return;
+    savedJobsContainer.innerHTML = '';
+    updateNavBadge();
+
+    const query = (savedSearchInput?.value || '').toLowerCase().trim();
     const filtered = jobs.filter(j => {
       if (!query) return true;
       return (j.title && j.title.toLowerCase().includes(query)) ||
@@ -240,12 +296,73 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  savedSearchInput.addEventListener('input', async () => {
+  function renderAppliedJobs(jobs) {
+    if (!appliedJobsContainer) return;
+    appliedJobsContainer.innerHTML = '';
+    updateNavBadge();
+
+    const query = (appliedSearchInput?.value || '').toLowerCase().trim();
+    const filtered = jobs.filter(j => {
+      if (!query) return true;
+      return (j.title && j.title.toLowerCase().includes(query)) ||
+             (j.company && j.company.toLowerCase().includes(query)) ||
+             (j.location && j.location.toLowerCase().includes(query));
+    });
+
+    if (filtered.length === 0) {
+      appliedJobsContainer.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 20px; font-size: 12px;">No applied jobs recorded yet.</div>';
+      return;
+    }
+
+    filtered.forEach((job, index) => {
+      const card = document.createElement('div');
+      card.className = 'saved-job-card';
+
+      const dateStr = job.appliedAt ? new Date(job.appliedAt).toLocaleDateString() : 'Recent';
+      const salaryTag = job.salary ? `<span style="font-size: 11px; color: var(--accent-success);">${job.salary}</span>` : '';
+
+      card.innerHTML = `
+        <div class="job-card-header">
+          <div>
+            <div class="job-card-title">${job.title || 'Untitled Role'}</div>
+            <div class="job-card-meta">${job.company || 'Unknown Company'} • ${job.location || 'India'}</div>
+          </div>
+          <span class="job-card-reason" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3);">✅ Applied</span>
+        </div>
+        ${salaryTag ? `<div>${salaryTag}</div>` : ''}
+        <div style="font-size: 10px; color: var(--text-secondary);">Applied on: ${dateStr}</div>
+        <div class="job-card-actions">
+          <button class="btn btn-secondary btn-open-job" data-url="${job.url}">🔗 Open Job</button>
+          <button class="btn btn-danger btn-delete-job" data-index="${index}">🗑 Remove</button>
+        </div>
+      `;
+
+      card.querySelector('.btn-open-job').addEventListener('click', (e) => {
+        const url = e.currentTarget.dataset.url;
+        if (url) chrome.tabs.create({ url });
+      });
+
+      card.querySelector('.btn-delete-job').addEventListener('click', async () => {
+        jobs.splice(index, 1);
+        await chrome.storage.local.set({ appliedJobs: jobs });
+        renderAppliedJobs(jobs);
+      });
+
+      appliedJobsContainer.appendChild(card);
+    });
+  }
+
+  savedSearchInput?.addEventListener('input', async () => {
     const data = await chrome.storage.local.get(['savedJobs']);
     renderSavedJobs(data.savedJobs || []);
   });
 
-  btnExportSaved.addEventListener('click', async () => {
+  appliedSearchInput?.addEventListener('input', async () => {
+    const data = await chrome.storage.local.get(['appliedJobs']);
+    renderAppliedJobs(data.appliedJobs || []);
+  });
+
+  btnExportSaved?.addEventListener('click', async () => {
     const data = await chrome.storage.local.get(['savedJobs']);
     const jobs = data.savedJobs || [];
     if (jobs.length === 0) {
@@ -268,11 +385,133 @@ document.addEventListener('DOMContentLoaded', async () => {
     URL.revokeObjectURL(url);
   });
 
-  btnClearSaved.addEventListener('click', async () => {
+  btnExportApplied?.addEventListener('click', async () => {
+    const data = await chrome.storage.local.get(['appliedJobs']);
+    const jobs = data.appliedJobs || [];
+    if (jobs.length === 0) {
+      alert('No applied jobs to export!');
+      return;
+    }
+
+    let csv = 'Title,Company,Location,Salary,AppliedAt,URL\n';
+    jobs.forEach(j => {
+      const escape = (val) => `"${String(val || '').replace(/"/g, '""')}"`;
+      csv += `${escape(j.title)},${escape(j.company)},${escape(j.location)},${escape(j.salary)},${escape(j.appliedAt)},${escape(j.url)}\n`;
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `indeed_applied_jobs_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  btnClearSaved?.addEventListener('click', async () => {
     if (confirm('Are you sure you want to clear all saved jobs?')) {
       await chrome.storage.local.set({ savedJobs: [] });
       renderSavedJobs([]);
     }
+  });
+
+  btnClearApplied?.addEventListener('click', async () => {
+    if (confirm('Are you sure you want to clear all applied jobs records?')) {
+      await chrome.storage.local.set({ appliedJobs: [] });
+      renderAppliedJobs([]);
+    }
+  });
+
+  // Screening Q&A Bank Renderer and Handlers
+  function renderQaBank(screeningList = []) {
+    if (!qaListContainer) return;
+    qaListContainer.innerHTML = '';
+
+    if (screeningList.length === 0) {
+      qaListContainer.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 14px; font-size: 11.5px;">No screening Q&A rules configured yet.<br>Click "+ Add Question" to create one.</div>';
+      return;
+    }
+
+    screeningList.forEach((item, index) => {
+      const card = document.createElement('div');
+      card.className = 'qa-card';
+
+      const keywords = (item.keywords || '').split(',').map(k => k.trim()).filter(Boolean);
+      const tagsHtml = keywords.map(kw => `<span class="qa-keyword-tag">${kw}</span>`).join('');
+
+      card.innerHTML = `
+        <div class="qa-card-header">
+          <div class="qa-keywords-wrap">${tagsHtml}</div>
+          <div class="qa-actions">
+            <button class="qa-btn-action btn-edit-qa" title="Edit Rule">✏️</button>
+            <button class="qa-btn-action btn-delete-qa" title="Delete Rule">🗑️</button>
+          </div>
+        </div>
+        <div class="qa-card-body">
+          <span style="font-size: 10.5px; color: var(--text-secondary);">Answer:</span>
+          <span class="qa-answer-badge">${item.answer || ''}</span>
+        </div>
+      `;
+
+      card.querySelector('.btn-edit-qa').addEventListener('click', () => {
+        qaFormTitle.textContent = 'Edit Screening Rule';
+        qaEditIndex.value = index;
+        qaInputKeywords.value = item.keywords || '';
+        qaInputAnswer.value = item.answer || '';
+        qaFormContainer.style.display = 'block';
+        qaInputKeywords.focus();
+      });
+
+      card.querySelector('.btn-delete-qa').addEventListener('click', async () => {
+        const data = await chrome.storage.local.get(['userProfile']);
+        const prof = data.userProfile || {};
+        const screening = prof.screening || [];
+        screening.splice(index, 1);
+        prof.screening = screening;
+        await chrome.storage.local.set({ userProfile: prof });
+        renderQaBank(screening);
+      });
+
+      qaListContainer.appendChild(card);
+    });
+  }
+
+  btnOpenAddQa?.addEventListener('click', () => {
+    qaFormTitle.textContent = 'Add Screening Rule';
+    qaEditIndex.value = '-1';
+    qaInputKeywords.value = '';
+    qaInputAnswer.value = '';
+    qaFormContainer.style.display = 'block';
+    qaInputKeywords.focus();
+  });
+
+  btnCancelQa?.addEventListener('click', () => {
+    qaFormContainer.style.display = 'none';
+  });
+
+  btnSaveQa?.addEventListener('click', async () => {
+    const keywords = qaInputKeywords.value.trim();
+    const answer = qaInputAnswer.value.trim();
+    if (!keywords || !answer) {
+      alert('Please provide both question keywords and an answer value.');
+      return;
+    }
+
+    const data = await chrome.storage.local.get(['userProfile']);
+    const prof = data.userProfile || {};
+    const screening = prof.screening || [];
+    const editIdx = parseInt(qaEditIndex.value, 10);
+
+    if (editIdx >= 0 && editIdx < screening.length) {
+      screening[editIdx] = { keywords, answer };
+    } else {
+      screening.push({ keywords, answer });
+    }
+
+    prof.screening = screening;
+    await chrome.storage.local.set({ userProfile: prof });
+    renderQaBank(screening);
+    qaFormContainer.style.display = 'none';
   });
 
   btnClearLogs.addEventListener('click', async () => {
@@ -285,6 +524,54 @@ document.addEventListener('DOMContentLoaded', async () => {
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+  }
+
+  function renderDropoffAnalytics(reasons = {}) {
+    const logsDropoffContainer = document.getElementById('logs-dropoff-container');
+    const dropoffTotalSkipped = document.getElementById('dropoff-total-skipped');
+    if (!logsDropoffContainer) return;
+
+    const categories = [
+      { key: 'experience', label: '🎓 Experience Exceeded', class: 'fill-exp' },
+      { key: 'salary', label: '💰 Salary Floor Unmet', class: 'fill-salary' },
+      { key: 'blacklist', label: '🚫 Blacklist Keyword', class: 'fill-blacklist' },
+      { key: 'location', label: '📍 Outside Target Location', class: 'fill-loc' },
+      { key: 'company', label: '🏢 Blocked Company', class: 'fill-company' },
+      { key: 'easy_apply', label: '⚡ External Site (Easy Apply Only)', class: 'fill-easy' },
+      { key: 'unrecognized', label: '❓ Unrecognized / Expired', class: 'fill-other' }
+    ];
+
+    let total = 0;
+    categories.forEach(c => {
+      c.count = reasons[c.key] || 0;
+      total += c.count;
+    });
+
+    if (dropoffTotalSkipped) {
+      dropoffTotalSkipped.textContent = `${total} Skipped`;
+    }
+
+    if (total === 0) {
+      logsDropoffContainer.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 8px; font-size: 11px;">No skipped jobs recorded for this period.</div>';
+      return;
+    }
+
+    logsDropoffContainer.innerHTML = categories
+      .filter(c => c.count > 0)
+      .map(c => {
+        const pct = Math.round((c.count / total) * 100);
+        return `
+          <div class="dropoff-row">
+            <div class="dropoff-header">
+              <span class="dropoff-name">${c.label}</span>
+              <span class="dropoff-count">${c.count} (${pct}%)</span>
+            </div>
+            <div class="dropoff-bar-bg">
+              <div class="dropoff-bar-fill ${c.class}" style="width: ${pct}%;"></div>
+            </div>
+          </div>
+        `;
+      }).join('');
   }
 
   async function renderAnalytics(period = 'daily') {
@@ -379,6 +666,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       } else {
         logsBreakdownContainer.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 25px 10px; font-size: 11.5px;">No auto-apply sessions recorded today.<br>Click "Start Auto-Apply" to begin!</div>';
       }
+
+      const dailyReasons = Object.assign({}, autoApplySession.skipReasons || {}, rec.skipReasons || {});
+      renderDropoffAnalytics(dailyReasons);
     } else if (period === 'weekly') {
       const days = [];
       let scannedSum = 0, appliedSum = 0, savedSum = 0, skippedSum = 0, sessSum = 0;
@@ -461,6 +751,17 @@ document.addEventListener('DOMContentLoaded', async () => {
           </tfoot>
         </table>
       `;
+
+      const weeklyReasons = {};
+      days.forEach(d => {
+        const r = history[d.dateKey];
+        if (r && r.skipReasons) {
+          Object.entries(r.skipReasons).forEach(([k, v]) => {
+            weeklyReasons[k] = (weeklyReasons[k] || 0) + v;
+          });
+        }
+      });
+      renderDropoffAnalytics(weeklyReasons);
     } else if (period === 'monthly') {
       const year = now.getFullYear();
       const month = now.getMonth();
@@ -539,6 +840,16 @@ document.addEventListener('DOMContentLoaded', async () => {
           </table>
         `;
       }
+
+      const monthlyReasons = {};
+      monthEntries.forEach(m => {
+        if (m.skipReasons) {
+          Object.entries(m.skipReasons).forEach(([k, v]) => {
+            monthlyReasons[k] = (monthlyReasons[k] || 0) + v;
+          });
+        }
+      });
+      renderDropoffAnalytics(monthlyReasons);
     } else if (period === 'yearly') {
       const currentYear = now.getFullYear();
       const yearPrefix = `${currentYear}-`;
@@ -635,6 +946,16 @@ document.addEventListener('DOMContentLoaded', async () => {
           </tfoot>
         </table>
       `;
+
+      const yearlyReasons = {};
+      Object.keys(history).forEach(k => {
+        if (k.startsWith(yearPrefix) && history[k].skipReasons) {
+          Object.entries(history[k].skipReasons).forEach(([subK, v]) => {
+            yearlyReasons[subK] = (yearlyReasons[subK] || 0) + v;
+          });
+        }
+      });
+      renderDropoffAnalytics(yearlyReasons);
     }
   }
 
@@ -694,8 +1015,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       maxJobsPerSession: parseInt(ruleMaxJobs.value, 10) || 25,
       stepDelayMs: parseInt(ruleDelay.value, 10) || 1500,
       blacklistKeywords: ruleBlacklist.value.trim(),
+      blockedCompanies: (ruleCompanyBlacklist?.value || '').trim(),
       targetResumeName: ruleTargetResume.value.trim(),
-      strictLocation: ruleStrictLocation.checked
+      strictLocation: ruleStrictLocation.checked,
+      easyApplyOnly: !!ruleEasyApplyOnly?.checked
     };
 
     await chrome.storage.local.set({ autoApplierSettings: customSettings });
@@ -735,8 +1058,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       maxJobsPerSession: parseInt(ruleMaxJobs.value, 10) || 25,
       stepDelayMs: parseInt(ruleDelay.value, 10) || 1500,
       blacklistKeywords: ruleBlacklist.value.trim(),
+      blockedCompanies: (ruleCompanyBlacklist?.value || '').trim(),
       targetResumeName: ruleTargetResume.value.trim(),
-      strictLocation: ruleStrictLocation.checked
+      strictLocation: ruleStrictLocation.checked,
+      easyApplyOnly: !!ruleEasyApplyOnly?.checked
     };
 
     await chrome.storage.local.set({ autoApplierSettings: updated });
@@ -798,6 +1123,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       if (changes.savedJobs) {
         renderSavedJobs(changes.savedJobs.newValue || []);
+      }
+      if (changes.appliedJobs) {
+        renderAppliedJobs(changes.appliedJobs.newValue || []);
+      }
+      if (changes.userProfile) {
+        renderQaBank(changes.userProfile.newValue?.screening || []);
       }
       if (changes.analyticsHistory || changes.sessionHistory) {
         renderAnalytics(currentLogsPeriod);

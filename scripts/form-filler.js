@@ -36,6 +36,26 @@
     }
   }
 
+  // Synthesize pleasant two-tone chime via Web Audio API (offline, zero assets)
+  function playAudioChime() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.15); // A5
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.4);
+    } catch (_) {}
+  }
+
   function setSelectValue(selectEl, value) {
     if (!selectEl || !value) return false;
     if (selectEl.disabled) return false;
@@ -220,6 +240,7 @@
     if (hasCaptchaEl || hasCaptchaText) {
       if (!hasNotifiedCaptcha) {
         hasNotifiedCaptcha = true;
+        playAudioChime();
         chrome.runtime.sendMessage({ action: 'NOTIFY_CAPTCHA' }).catch(() => {});
       }
       return true;

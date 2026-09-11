@@ -50,6 +50,26 @@
     return sleep(Math.max(800, baseMs + jitter));
   }
 
+  // Synthesize pleasant two-tone chime via Web Audio API (offline, zero assets)
+  function playAudioChime() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.15); // A5
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.4);
+    } catch (_) {}
+  }
+
   // Floating in-page status pill
   function updateFloatingPill(text, isDone = false) {
     let pill = document.getElementById('indeed-auto-applier-pill');
@@ -301,6 +321,7 @@
         const localContainer = window.SpeedFillMatcher?.getAppContainer() || document.querySelector('[data-testid="ia-container"], #ia-container, div[role="dialog"]');
         if (localContainer && window.IndeedAutoFormFiller) {
           if (window.IndeedAutoFormFiller.checkCaptcha()) {
+            playAudioChime();
             log('⚠️ CAPTCHA detected on application! Pausing for user verification...', 'warning');
             while (window.IndeedAutoFormFiller.checkCaptcha() && !isHalted) {
               await sleep(2000);
@@ -356,6 +377,7 @@
               log('🎉 Application submitted in application frame!', 'success');
               return { success: true };
             } else if (response.action === 'captcha_detected') {
+              playAudioChime();
               log('⚠️ CAPTCHA detected in application frame! Pausing...', 'warning');
               await sleep(5000);
               handled = true;
@@ -463,7 +485,22 @@
     const jobUrl = window.location.href;
 
     log(`🔍 Inspecting: "${jobTitle}" at "${company}" (${location})`, 'info');
-    // 0. Blacklist / Negative Keywords Check (Word-boundary matching prevents false positives like "internet" or "internal")
+
+    // 0. Blocked Companies / Agency Check
+    const blockedCompaniesStr = settings?.blockedCompanies || '';
+    if (blockedCompaniesStr) {
+      const blockedTokens = blockedCompaniesStr.toLowerCase().split(/[,|]/).map(t => t.trim()).filter(t => t.length > 1);
+      const compLower = company.toLowerCase();
+      const matchedBlocked = blockedTokens.find(token => compLower.includes(token));
+      if (matchedBlocked) {
+        log(`⏭️ Skipped: "${jobTitle}" at "${company}" matches blocked company filter ("${matchedBlocked}").`, 'info');
+        chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1, reason: 'company' } }).catch(() => {});
+        card.style.border = originalBorder;
+        return 'skipped_company';
+      }
+    }
+
+    // 0.1 Blacklist / Negative Keywords Check (Word-boundary matching prevents false positives like "internet" or "internal")
     const blacklistStr = settings?.blacklistKeywords || 'intern, unpaid, bpo, telecaller, faculty, teaching, night shift';
     const blacklistTokens = blacklistStr.toLowerCase().split(/[,|]/).map(t => t.trim()).filter(t => t.length > 1);
     const fullTextLower = `${jobTitle} \n ${description}`.toLowerCase();
@@ -485,12 +522,12 @@
 
     if (matchedBlacklist) {
       log(`⏭️ Skipped: "${jobTitle}" matches blacklist keyword "${matchedBlacklist}".`, 'info');
-      chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1 } }).catch(() => {});
+      chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1, reason: 'blacklist' } }).catch(() => {});
       card.style.border = originalBorder;
       return 'skipped_blacklist';
     }
 
-    // 0.1 Strict Location Filter (Target City + Remote Only)
+    // 0.2 Strict Location Filter (Target City + Remote Only)
     if (settings?.strictLocation !== false) {
       const locLower = location.toLowerCase();
       const rawTarget = (settings?.targetLocation || '').toLowerCase().trim();
@@ -509,7 +546,7 @@
 
       if (!isRemote && !isCityMatch) {
         log(`⏭️ Skipped: "${jobTitle}" at "${location}" is outside target location and not Remote.`, 'info');
-        chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1 } }).catch(() => {});
+        chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1, reason: 'location' } }).catch(() => {});
         card.style.border = originalBorder;
         return 'skipped_location';
       }
@@ -522,7 +559,7 @@
     if (sal) {
       if (sal.maxMonthly < minSalaryFloor) {
         log(`⏭️ Skipped: "${jobTitle}" salary range (₹${sal.minMonthly.toLocaleString()} - ₹${sal.maxMonthly.toLocaleString()}/mo) below ₹${minSalaryFloor.toLocaleString()} floor.`, 'info');
-        chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1 } }).catch(() => {});
+        chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1, reason: 'salary' } }).catch(() => {});
         card.style.border = originalBorder;
         return 'skipped_salary';
       }
@@ -535,7 +572,7 @@
     // If experience is explicitly required and exceeds user experience -> SKIP!
     if (reqExp !== null && reqExp > userExp) {
       log(`⏭️ Skipped: "${jobTitle}" requires ${reqExp}+ years of experience (Your profile: ${userExp} yr).`, 'info');
-      chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1 } }).catch(() => {});
+      chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1, reason: 'experience' } }).catch(() => {});
       card.style.border = originalBorder;
       return 'skipped_experience';
     }
@@ -543,7 +580,7 @@
     // If experience is unlisted and user explicitly requested to skip
     if (reqExp === null && settings?.unlistedExpAction === 'skip') {
       log(`⏭️ Skipped: "${jobTitle}" has no experience requirement listed (Policy: Skip).`, 'info');
-      chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1 } }).catch(() => {});
+      chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1, reason: 'experience' } }).catch(() => {});
       card.style.border = originalBorder;
       return 'skipped_unlisted_exp';
     }
@@ -552,7 +589,7 @@
     if (/\b(senior|sr\.|lead|manager|principal|architect|director|head of)\b/i.test(jobTitle) &&
         !/\b(executive|assistant|junior|jr\.|trainee|associate)\b/i.test(jobTitle)) {
       log(`⏭️ Skipped: "${jobTitle}" is a senior/managerial role.`, 'info');
-      chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1 } }).catch(() => {});
+      chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1, reason: 'senior' } }).catch(() => {});
       card.style.border = originalBorder;
       return 'skipped_senior';
     }
@@ -590,8 +627,14 @@
       return result.success ? 'applied' : 'apply_failed';
     }
 
-    // Subcase B: "Apply on Company Site" -> SAVE ONLY BECAUSE CRITERIA FITS!
+    // Subcase B: "Apply on Company Site" -> SAVE ONLY BECAUSE CRITERIA FITS (or skip if easyApplyOnly)
     if (applyInfo.type === 'company_site') {
+      if (settings?.easyApplyOnly) {
+        log(`⏭️ Skipped: "${jobTitle}" requires application on external company site (Easy Apply Only mode active).`, 'info');
+        chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1, reason: 'easy_apply' } }).catch(() => {});
+        card.style.border = originalBorder;
+        return 'skipped_external';
+      }
       log(`📋 Criteria matched! Saving company site job: "${jobTitle}" at "${company}".`, 'info');
       chrome.runtime.sendMessage({
         action: 'SAVE_JOB',
@@ -603,7 +646,7 @@
 
     // Subcase C: Unrecognized / expired apply button -> SKIP (do not keep saving unknown jobs)
     log(`⏭️ Skipped: Unrecognized or inactive apply button for "${jobTitle}".`, 'info');
-    chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1 } }).catch(() => {});
+    chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1, reason: 'unrecognized' } }).catch(() => {});
     card.style.border = originalBorder;
     return 'skipped_unrecognized';
   }
@@ -737,9 +780,9 @@
 
         const hasNext = await navigateToNextPage();
         if (!hasNext) {
-          log('No further pages found. Completed all available listings.', 'info');
+          log('No further pages found for current search query.', 'info');
           const finalData = await chrome.storage.local.get(['autoApplySession']);
-          chrome.runtime.sendMessage({ action: 'SESSION_COMPLETED', summary: finalData.autoApplySession?.stats }).catch(() => {});
+          chrome.runtime.sendMessage({ action: 'QUERY_RESULTS_FINISHED', summary: finalData.autoApplySession?.stats }).catch(() => {});
           break;
         }
       }
@@ -758,6 +801,11 @@
       removeFloatingPill();
       log('Session halted by user request.', 'warning');
       sendResponse({ status: 'halted' });
+      return true;
+    }
+    if (request.action === 'PLAY_ALERT_CHIME') {
+      playAudioChime();
+      sendResponse({ status: 'played' });
       return true;
     }
   });

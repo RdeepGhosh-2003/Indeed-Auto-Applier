@@ -36,11 +36,17 @@ async function updateSessionStats(delta) {
   try {
     const data = await chrome.storage.local.get(['autoApplySession', 'analyticsHistory']);
     const session = data.autoApplySession || { isRunning: false, stats: { scanned: 0, applied: 0, saved: 0, skipped: 0 } };
+    session.skipReasons = session.skipReasons || { blacklist: 0, location: 0, salary: 0, experience: 0, senior: 0, company: 0, easy_apply: 0, unrecognized: 0 };
     
     if (delta.scanned) session.stats.scanned = (session.stats.scanned || 0) + delta.scanned;
     if (delta.applied) session.stats.applied = (session.stats.applied || 0) + delta.applied;
     if (delta.saved) session.stats.saved = (session.stats.saved || 0) + delta.saved;
-    if (delta.skipped) session.stats.skipped = (session.stats.skipped || 0) + delta.skipped;
+    if (delta.skipped) {
+      session.stats.skipped = (session.stats.skipped || 0) + delta.skipped;
+      if (delta.reason) {
+        session.skipReasons[delta.reason] = (session.skipReasons[delta.reason] || 0) + delta.skipped;
+      }
+    }
 
     const today = getLocalDateKey();
     const history = data.analyticsHistory || {};
@@ -52,13 +58,21 @@ async function updateSessionStats(delta) {
         saved: 0,
         skipped: 0,
         sessions: session.isRunning ? 1 : 0,
+        skipReasons: { blacklist: 0, location: 0, salary: 0, experience: 0, senior: 0, company: 0, easy_apply: 0, unrecognized: 0 },
         lastUpdated: Date.now()
       };
     }
+    history[today].skipReasons = history[today].skipReasons || { blacklist: 0, location: 0, salary: 0, experience: 0, senior: 0, company: 0, easy_apply: 0, unrecognized: 0 };
+
     if (delta.scanned) history[today].scanned = (history[today].scanned || 0) + delta.scanned;
     if (delta.applied) history[today].applied = (history[today].applied || 0) + delta.applied;
     if (delta.saved) history[today].saved = (history[today].saved || 0) + delta.saved;
-    if (delta.skipped) history[today].skipped = (history[today].skipped || 0) + delta.skipped;
+    if (delta.skipped) {
+      history[today].skipped = (history[today].skipped || 0) + delta.skipped;
+      if (delta.reason) {
+        history[today].skipReasons[delta.reason] = (history[today].skipReasons[delta.reason] || 0) + delta.skipped;
+      }
+    }
     history[today].lastUpdated = Date.now();
 
     await chrome.storage.local.set({ 
@@ -66,7 +80,7 @@ async function updateSessionStats(delta) {
       analyticsHistory: history
     });
 
-    chrome.runtime.sendMessage({ action: 'STATS_UPDATED', stats: session.stats }).catch(() => {});
+    chrome.runtime.sendMessage({ action: 'STATS_UPDATED', stats: session.stats, skipReasons: session.skipReasons }).catch(() => {});
     chrome.runtime.sendMessage({ action: 'ANALYTICS_UPDATED', history }).catch(() => {});
   } catch (err) {
     console.error('[Background] Failed to update stats:', err);
@@ -129,6 +143,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const notifId = `captcha_${tabId}_${Date.now()}`;
     notificationTabMap.set(notifId, { tabId, windowId });
 
+    // Relay chime to active tab
+    chrome.tabs.sendMessage(tabId, { action: 'PLAY_ALERT_CHIME' }).catch(() => {});
+
     if (chrome.notifications) {
       try {
         chrome.notifications.create(notifId, {
@@ -179,6 +196,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === 'QUERY_RESULTS_FINISHED') {
+    if (sender && sender.frameId && sender.frameId !== 0) {
+      sendResponse({ status: 'ignored' });
+      return true;
+    }
+    handleQueryResultsFinished(request.summary)
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   if (request.action === 'SESSION_COMPLETED') {
     if (sender && sender.frameId && sender.frameId !== 0) {
       console.warn('[Background] Ignored SESSION_COMPLETED from non-top frame:', sender.frameId);
@@ -189,7 +217,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (sender?.tab?.id && data?.autoApplySession?.tabId && sender.tab.id !== data.autoApplySession.tabId) {
         console.warn('[Background] Ignored SESSION_COMPLETED from non-session tab:', sender.tab.id);
         sendResponse({ status: 'ignored' });
-        return;
+        return true;
       }
       handleSessionCompleted(request.summary);
       sendResponse({ status: 'ok' });
@@ -204,7 +232,13 @@ async function handleStartAutoApply(customSettings) {
   const profile = data.userProfile || {};
   const settings = Object.assign({}, profile.autoApplierSettings || {}, data.autoApplierSettings || {}, customSettings || {});
 
-  const query = encodeURIComponent(settings.targetJobQuery || profile.work?.targetRole?.jobTitle || 'MIS Analyst');
+  const rawQuery = settings.targetJobQuery || profile.work?.targetRole?.jobTitle || 'MIS Analyst';
+  const queryQueue = rawQuery.split(/[,;]/).map(q => q.trim()).filter(q => q.length > 0);
+  if (queryQueue.length === 0) queryQueue.push('MIS Analyst');
+
+  const currentQueryIndex = 0;
+  const currentQuery = queryQueue[currentQueryIndex];
+  const query = encodeURIComponent(currentQuery);
   const loc = encodeURIComponent(settings.targetLocation || profile.work?.targetRole?.targetLocation || 'Bangalore, Karnataka');
 
   // Date posted filter: 'fromage=1' for Last 24 hours, sorted by date (newest first)
@@ -216,7 +250,10 @@ async function handleStartAutoApply(customSettings) {
     isRunning: true,
     startTime: Date.now(),
     settings: settings,
+    queryQueue: queryQueue,
+    currentQueryIndex: currentQueryIndex,
     stats: { scanned: 0, applied: 0, saved: 0, skipped: 0 },
+    skipReasons: { blacklist: 0, location: 0, salary: 0, experience: 0, senior: 0, company: 0, easy_apply: 0, unrecognized: 0 },
     processedJks: []
   };
 
@@ -230,6 +267,7 @@ async function handleStartAutoApply(customSettings) {
       saved: 0,
       skipped: 0,
       sessions: 0,
+      skipReasons: { blacklist: 0, location: 0, salary: 0, experience: 0, senior: 0, company: 0, easy_apply: 0, unrecognized: 0 },
       lastUpdated: Date.now()
     };
   }
@@ -242,7 +280,8 @@ async function handleStartAutoApply(customSettings) {
     analyticsHistory: history
   });
 
-  await appendSessionLog(`🚀 Auto-Apply session started for "${settings.targetJobQuery || 'MIS Analyst'}" in "${settings.targetLocation || 'Bangalore'}" (Filter: Last 24 Hours)`, 'info');
+  const queueLabel = queryQueue.length > 1 ? `role [1/${queryQueue.length}: "${currentQuery}"] (Queue: ${queryQueue.join(', ')})` : `"${currentQuery}"`;
+  await appendSessionLog(`🚀 Auto-Apply session started for ${queueLabel} in "${settings.targetLocation || 'Bangalore'}" (Filter: Last 24 Hours)`, 'info');
 
   const tabs = await chrome.tabs.query({ url: ['https://*.indeed.com/jobs*', 'https://indeed.com/jobs*'] });
   let targetTab;
@@ -275,10 +314,11 @@ async function handleStopAutoApply() {
       date: getLocalDateKey(new Date(session.startTime)),
       startTime: session.startTime,
       endTime: Date.now(),
-      query: session.settings?.targetJobQuery || 'Job Search',
+      query: (session.queryQueue && session.queryQueue.length > 1) ? session.queryQueue.join(', ') : (session.settings?.targetJobQuery || 'Job Search'),
       location: session.settings?.targetLocation || '',
       maxJobs: session.settings?.maxJobsPerSession || 25,
       stats: { ...(session.stats || { scanned: 0, applied: 0, saved: 0, skipped: 0 }) },
+      skipReasons: { ...(session.skipReasons || {}) },
       status: 'stopped'
     });
     if (sessionHistory.length > 100) sessionHistory.pop();
@@ -329,6 +369,40 @@ async function handleJobApplied(job) {
   return { success: true, appliedCount: applied.length };
 }
 
+// Query results finished - advance multi-role queue or complete session
+async function handleQueryResultsFinished(summary) {
+  const data = await chrome.storage.local.get(['autoApplySession']);
+  const session = data.autoApplySession;
+  if (!session || !session.isRunning) return { completed: true };
+
+  const queue = session.queryQueue || [];
+  const nextIndex = (session.currentQueryIndex || 0) + 1;
+
+  if (nextIndex < queue.length) {
+    session.currentQueryIndex = nextIndex;
+    const nextQuery = queue[nextIndex];
+    const query = encodeURIComponent(nextQuery);
+    const loc = encodeURIComponent(session.settings?.targetLocation || 'Bangalore, Karnataka');
+    const searchUrl = `https://in.indeed.com/jobs?q=${query}&l=${loc}&fromage=1&sort=date`;
+
+    await appendSessionLog(`🔄 Multi-Role Queue: Advancing to next role [${nextIndex + 1}/${queue.length}]: "${nextQuery}"...`, 'info');
+    await chrome.storage.local.set({ autoApplySession: session });
+
+    if (session.tabId) {
+      try {
+        await chrome.tabs.update(session.tabId, { url: searchUrl, active: true });
+        return { advanced: true, query: nextQuery };
+      } catch (err) {
+        console.warn('[Background] Failed to navigate session tab to next query:', err);
+      }
+    }
+  }
+
+  // All queries in queue finished!
+  await handleSessionCompleted(summary || session.stats);
+  return { completed: true };
+}
+
 // Session complete handler
 async function handleSessionCompleted(summary = {}) {
   const data = await chrome.storage.local.get(['autoApplySession', 'sessionHistory']);
@@ -342,7 +416,7 @@ async function handleSessionCompleted(summary = {}) {
       date: getLocalDateKey(new Date(session.startTime)),
       startTime: session.startTime,
       endTime: Date.now(),
-      query: session.settings?.targetJobQuery || 'Job Search',
+      query: (session.queryQueue && session.queryQueue.length > 1) ? session.queryQueue.join(', ') : (session.settings?.targetJobQuery || 'Job Search'),
       location: session.settings?.targetLocation || '',
       maxJobs: session.settings?.maxJobsPerSession || 25,
       stats: {
@@ -351,6 +425,7 @@ async function handleSessionCompleted(summary = {}) {
         saved: summary.saved !== undefined ? summary.saved : (session.stats?.saved || 0),
         skipped: summary.skipped !== undefined ? summary.skipped : (session.stats?.skipped || 0)
       },
+      skipReasons: { ...(session.skipReasons || {}) },
       status: 'completed'
     });
     if (sessionHistory.length > 100) sessionHistory.pop();
@@ -406,7 +481,7 @@ chrome.runtime.onInstalled.addListener(() => {
             savedJobs: [],
             appliedJobs: [],
             sessionLogs: [],
-            autoApplySession: { isRunning: false, stats: { scanned: 0, applied: 0, saved: 0, skipped: 0 } },
+            autoApplySession: { isRunning: false, stats: { scanned: 0, applied: 0, saved: 0, skipped: 0 }, skipReasons: { blacklist: 0, location: 0, salary: 0, experience: 0, senior: 0, company: 0, easy_apply: 0, unrecognized: 0 } },
             analyticsHistory: {},
             sessionHistory: []
           }, () => {

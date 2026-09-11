@@ -674,3 +674,181 @@ input:focus, select:focus {
 .tag-saved { background-color: rgba(245, 158, 11, 0.15); color: #f59e0b; }
 .tag-skipped { background-color: rgba(148, 163, 184, 0.15); color: #94a3b8; }
 
+/* Segmented Control for Tab 3 */
+.segmented-control {
+  display: flex;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 2px;
+  margin-bottom: 10px;
+  gap: 2px;
+}
+
+.segmented-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 6px 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.segmented-btn:hover {
+  color: var(--text-primary);
+}
+
+.segmented-btn.active {
+  background-color: var(--accent-primary);
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* Drop-off Analytics Bars */
+.dropoff-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dropoff-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.dropoff-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
+
+.dropoff-name {
+  color: var(--text-primary);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dropoff-count {
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.dropoff-bar-bg {
+  width: 100%;
+  height: 6px;
+  background-color: var(--bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.dropoff-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.fill-exp { background-color: #f59e0b; }
+.fill-salary { background-color: #ef4444; }
+.fill-blacklist { background-color: #dc2626; }
+.fill-loc { background-color: #8b5cf6; }
+.fill-company { background-color: #ec4899; }
+.fill-easy { background-color: #06b6d4; }
+.fill-other { background-color: #64748b; }
+
+/* Screening Q&A Bank Styles */
+.qa-list-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.qa-card {
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  transition: border-color 0.2s;
+}
+
+.qa-card:hover {
+  border-color: var(--accent-primary);
+}
+
+.qa-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.qa-keywords-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.qa-keyword-tag {
+  background-color: rgba(37, 99, 235, 0.15);
+  color: #60a5fa;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+}
+
+.qa-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.qa-btn-action {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+  padding: 0 2px;
+}
+
+.qa-btn-action:hover {
+  opacity: 1;
+}
+
+.qa-card-body {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+}
+
+.qa-answer-badge {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 11px;
+}
+
