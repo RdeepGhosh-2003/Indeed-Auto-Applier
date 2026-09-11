@@ -271,7 +271,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             <div class="job-card-title">${job.title || 'Untitled Role'}</div>
             <div class="job-card-meta">${job.company || 'Unknown Company'} • ${job.location || 'India'}</div>
           </div>
-          <span class="job-card-reason">${job.reason || 'Saved'}</span>
+          <span class="job-card-reason" style="${(job.reason && job.reason.includes('⚠️')) ? 'background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);' : ''}">${job.reason || 'Saved'}</span>
         </div>
         ${salaryTag ? `<div>${salaryTag}</div>` : ''}
         <div style="font-size: 10px; color: var(--text-secondary);">Saved on: ${dateStr}</div>

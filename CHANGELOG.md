@@ -8,6 +8,7 @@ This document serves as the permanent chronological reference for all updates, f
 
 | Version | Date & Timestamp | Type | Key Highlights |
 |---|---|---|---|
+| **`v1.1.2`** | 2026-09-11 15:15 IST | **Core Accounting & Opportunity Protection** | Auto-saves incomplete Indeed applications to Saved Jobs with reason `⚠️ Incomplete: [Reason]`; ensures `Scanned = Applied + Saved + Skipped` is always 100% mathematically balanced; styles manual-review jobs with prominent coral badge in Saved tab. |
 | **`v1.1.1`** | 2026-09-11 13:00 IST | **UI & Spacing Optimization** | Eliminated empty height void in Filter Drop-off Breakdown, enabled auto-sizing on logs history table, shortened Saved tab label to prevent tab bar crowding, reconciled drop-off count with historical period skips. |
 | **`v1.1.0`** | 2026-09-11 12:45 IST | **Major Feature Suite** | Screening Q&A Bank Manager, Applied Jobs Tracker, Filter Drop-Off Analytics, Easy Apply Only Mode, Company Blacklist, Audio Chimes, Multi-Role Search Queue. |
 | **`v1.0.8`** | 2026-09-11 11:56 IST | **UI / Spacing Fix** | Equalized navigation tab spacing across 500px popup body; added weekday names to Today/Yesterday in weekly log tables (`Today, Fri`, `Yesterday, Thu`). |
@@ -30,6 +31,17 @@ This document serves as the permanent chronological reference for all updates, f
 ---
 
 ## 🔍 Detailed Version Records
+
+### `v1.1.2` — Math Balancing & Incomplete Application Auto-Save
+- **Date**: September 11, 2026 (15:15 IST)
+- **Commits**: `fix(accounting): auto-save incomplete applications to prevent lost opportunities and ensure mathematical balance`
+- **Files Modified**: `scripts/applier.js`, `scripts/background.js`, `popup/popup.js`, `manifest.json`, `CHANGELOG.md`, `walkthrough.md`.
+- **What Was Added / Updated:**
+  1. **📋 Auto-Save Incomplete Applications**: When an "Apply with Indeed" multi-step wizard cannot auto-complete (e.g. unhandled employer question or step limit), the job is now automatically saved into `Saved Jobs` with the exact diagnostic reason (e.g. `⚠️ Incomplete: Unresolved Questions`). This ensures matched jobs that passed all user filters are never lost and can be manually submitted in 30 seconds.
+  2. **⚖️ 100% Mathematical Accounting Balance**: Resolved the discrepancy where failed applications were scanned but never credited to applied, saved, or skipped. With incomplete jobs recorded in `Saved Jobs`, the relationship $\mathbf{\text{Scanned} = \text{Applied} + \text{Saved} + \text{Skipped}}$ holds with complete mathematical precision.
+  3. **🛡️ Crawler Loop Exception Guard**: Added safety catch in `runCrawlLoop` so any unexpected card inspection errors immediately record `skipped: 1 (reason: unrecognized)` instead of leaving dangling scanned counts.
+  4. **🔄 Reliable Session Counter Updates**: Updated `handleSaveJob` in the service worker to consistently trigger `saved: 1` session stat increments even when updating existing saved jobs.
+  5. **🎨 High-Visibility Incomplete Badge**: Styled saved jobs requiring manual attention with a distinctive coral/red warning badge (`rgba(239, 68, 68, 0.15)`) in the Saved Jobs tab.
 
 ### `v1.1.1` — Layout Spacing & Drop-off Reconciliation
 - **Date**: September 11, 2026 (13:00 IST)

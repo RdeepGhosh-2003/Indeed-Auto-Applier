@@ -342,15 +342,19 @@ async function handleSaveJob(job) {
   const data = await chrome.storage.local.get(['savedJobs']);
   const saved = data.savedJobs || [];
 
-  const exists = saved.some(j => (job.jk && j.jk === job.jk) || (job.url && j.url === job.url) || (j.title === job.title && j.company === job.company));
-  if (!exists) {
+  const existingIndex = saved.findIndex(j => (job.jk && j.jk === job.jk) || (job.url && j.url === job.url) || (j.title === job.title && j.company === job.company));
+  if (existingIndex === -1) {
     job.savedAt = new Date().toISOString();
     saved.unshift(job);
     await chrome.storage.local.set({ savedJobs: saved });
     await updateSessionStats({ saved: 1 });
     await appendSessionLog(`📋 Saved Job: "${job.title}" at "${job.company}" (${job.reason || 'Company Site / Review'})`, 'success');
   } else {
-    await appendSessionLog(`ℹ️ Job already in saved list: "${job.title}"`, 'info');
+    saved[existingIndex].savedAt = new Date().toISOString();
+    if (job.reason) saved[existingIndex].reason = job.reason;
+    await chrome.storage.local.set({ savedJobs: saved });
+    await updateSessionStats({ saved: 1 });
+    await appendSessionLog(`📋 Updated Saved Job: "${job.title}" (${job.reason || 'Review'})`, 'info');
   }
   return { success: true, savedCount: saved.length };
 }

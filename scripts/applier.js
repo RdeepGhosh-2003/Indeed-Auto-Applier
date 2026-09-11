@@ -621,10 +621,26 @@
           job: { jk, title: jobTitle, company, location, salary: salaryText, url: jobUrl }
         }).catch(() => {});
       } else {
-        log(`⚠️ Could not auto-complete application for "${jobTitle}" (${result.reason || 'unresolved'}).`, 'warning');
+        const failDetail = result.reason === 'unresolved_fields' ? 'Unresolved Questions' :
+                           result.reason === 'max_steps_exceeded' ? 'Multi-Step Limit' :
+                           (result.reason || 'Manual Review');
+        log(`⚠️ Could not auto-complete application for "${jobTitle}" (${failDetail}).`, 'warning');
+        log(`📋 Auto-saving to "Saved Jobs" for manual completion so opportunity is not lost!`, 'info');
+        chrome.runtime.sendMessage({
+          action: 'SAVE_JOB',
+          job: {
+            jk,
+            title: jobTitle,
+            company,
+            location,
+            salary: salaryText,
+            url: jobUrl,
+            reason: `⚠️ Incomplete: ${failDetail}`
+          }
+        }).catch(() => {});
       }
       card.style.border = originalBorder;
-      return result.success ? 'applied' : 'apply_failed';
+      return result.success ? 'applied' : 'saved_incomplete';
     }
 
     // Subcase B: "Apply on Company Site" -> SAVE ONLY BECAUSE CRITERIA FITS (or skip if easyApplyOnly)
@@ -772,6 +788,7 @@
             }
           } catch (cardErr) {
             log(`⚠️ Error evaluating card: ${cardErr.message}. Skipping to next job...`, 'warning');
+            chrome.runtime.sendMessage({ action: 'UPDATE_STATS', delta: { skipped: 1, reason: 'unrecognized' } }).catch(() => {});
             try { card.style.border = ''; } catch (_) {}
           }
         }
