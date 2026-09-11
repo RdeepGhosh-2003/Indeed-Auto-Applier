@@ -30,6 +30,7 @@
       <button class="nav-tab-btn active" data-tab="tab-dashboard">🚀 Auto-Apply</button>
       <button class="nav-tab-btn" data-tab="tab-rules">⚙️ Rules & Filters</button>
       <button class="nav-tab-btn" data-tab="tab-saved">📋 Saved Jobs <span id="saved-count-badge" class="badge">0</span></button>
+      <button class="nav-tab-btn" data-tab="tab-logs">📊 Logs</button>
       <button class="nav-tab-btn" data-tab="tab-profile">👤 Profile</button>
     </nav>
 
@@ -174,7 +175,71 @@
         </div>
       </section>
 
-      <!-- TAB 4: PROFILE & SCREENING -->
+      <!-- TAB 4: LOGS & HISTORICAL ANALYTICS -->
+      <section id="tab-logs" class="tab-pane">
+        <!-- Period Filter Selector -->
+        <div class="period-selector-card">
+          <div class="period-tabs">
+            <button class="period-btn active" data-period="daily">📅 Daily</button>
+            <button class="period-btn" data-period="weekly">🗓️ Weekly</button>
+            <button class="period-btn" data-period="monthly">📆 Monthly</button>
+            <button class="period-btn" data-period="yearly">📈 Yearly</button>
+          </div>
+          <div class="period-info-row">
+            <span id="logs-period-label" class="period-label">Today's Activity</span>
+            <span id="logs-sessions-count" class="period-sub">0 Sessions Run</span>
+          </div>
+        </div>
+
+        <!-- Period Progress Card (Matching Pic 2) -->
+        <div class="control-card logs-progress-card">
+          <div class="progress-wrapper">
+            <div class="progress-info">
+              <span id="logs-progress-title">Period Progress</span>
+              <span id="logs-progress-text">0 / 0 Jobs</span>
+            </div>
+            <div class="progress-bar-bg">
+              <div id="logs-progress-bar-fill" class="progress-bar-fill" style="width: 0%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Metrics Grid (Matching Pic 2) -->
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <span class="metric-label">Scanned</span>
+            <span id="logs-metric-scanned" class="metric-value">0</span>
+          </div>
+          <div class="metric-card metric-success">
+            <span class="metric-label">Applied ✅</span>
+            <span id="logs-metric-applied" class="metric-value">0</span>
+          </div>
+          <div class="metric-card metric-warning">
+            <span class="metric-label">Saved 📋</span>
+            <span id="logs-metric-saved" class="metric-value">0</span>
+          </div>
+          <div class="metric-card metric-neutral">
+            <span class="metric-label">Skipped ⏭️</span>
+            <span id="logs-metric-skipped" class="metric-value">0</span>
+          </div>
+        </div>
+
+        <!-- Historical Breakdown Details -->
+        <div class="logs-details-card">
+          <div class="logs-details-header">
+            <span id="logs-table-heading">Activity Breakdown</span>
+            <div class="logs-actions-group">
+              <button id="btn-export-logs" class="text-btn" title="Export Analytics to CSV">📥 Export CSV</button>
+              <button id="btn-clear-history" class="text-btn" title="Clear Historical Logs">🗑 Clear</button>
+            </div>
+          </div>
+          <div id="logs-breakdown-container" class="logs-breakdown-body">
+            <!-- Dynamically rendered table or session list -->
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 5: PROFILE & SCREENING -->
       <section id="tab-profile" class="tab-pane">
         <div class="form-card">
           <h3 class="card-title">👤 Personal Details</h3>

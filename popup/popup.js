@@ -46,6 +46,24 @@ document.addEventListener('DOMContentLoaded', async () => {
   const btnExportSaved = document.getElementById('btn-export-saved');
   const btnClearSaved = document.getElementById('btn-clear-saved');
 
+  // Logs / Historical Analytics elements
+  const logsPeriodBtns = document.querySelectorAll('.period-btn');
+  const logsPeriodLabel = document.getElementById('logs-period-label');
+  const logsSessionsCount = document.getElementById('logs-sessions-count');
+  const logsProgressTitle = document.getElementById('logs-progress-title');
+  const logsProgressText = document.getElementById('logs-progress-text');
+  const logsProgressBarFill = document.getElementById('logs-progress-bar-fill');
+  const logsMetricScanned = document.getElementById('logs-metric-scanned');
+  const logsMetricApplied = document.getElementById('logs-metric-applied');
+  const logsMetricSaved = document.getElementById('logs-metric-saved');
+  const logsMetricSkipped = document.getElementById('logs-metric-skipped');
+  const logsTableHeading = document.getElementById('logs-table-heading');
+  const logsBreakdownContainer = document.getElementById('logs-breakdown-container');
+  const btnExportLogs = document.getElementById('btn-export-logs');
+  const btnClearHistory = document.getElementById('btn-clear-history');
+
+  let currentLogsPeriod = 'daily';
+
   const tabButtons = document.querySelectorAll('.nav-tab-btn');
   const tabPanes = document.querySelectorAll('.tab-pane');
 
@@ -56,7 +74,21 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       btn.classList.add('active');
       const targetPane = document.getElementById(btn.dataset.tab);
-      if (targetPane) targetPane.classList.add('active');
+      if (targetPane) {
+        targetPane.classList.add('active');
+        if (btn.dataset.tab === 'tab-logs') {
+          renderAnalytics(currentLogsPeriod);
+        }
+      }
+    });
+  });
+
+  logsPeriodBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      logsPeriodBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentLogsPeriod = btn.dataset.period || 'daily';
+      renderAnalytics(currentLogsPeriod);
     });
   });
 
@@ -115,6 +147,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     renderSavedJobs(data.savedJobs || []);
+    await renderAnalytics(currentLogsPeriod);
   }
 
   function updateSessionUI(session) {
@@ -247,6 +280,401 @@ document.addEventListener('DOMContentLoaded', async () => {
     consoleLogs.innerHTML = '<div class="log-entry log-info">[System] Logs cleared.</div>';
   });
 
+  function getLocalDateKey(d = new Date()) {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  async function renderAnalytics(period = 'daily') {
+    const data = await chrome.storage.local.get(['analyticsHistory', 'sessionHistory', 'autoApplySession']);
+    let history = data.analyticsHistory || {};
+    const sessions = data.sessionHistory || [];
+    const autoApplySession = data.autoApplySession || {};
+    const sessionStats = autoApplySession.stats || { scanned: 0, applied: 0, saved: 0, skipped: 0 };
+
+    const todayKey = getLocalDateKey();
+
+    // Auto-seed today's record if missing or empty but current session has stats
+    if ((!history[todayKey] || (history[todayKey].scanned === 0 && sessionStats.scanned > 0)) &&
+        (sessionStats.scanned > 0 || sessionStats.saved > 0 || sessionStats.applied > 0 || sessionStats.skipped > 0)) {
+      history[todayKey] = {
+        date: todayKey,
+        scanned: sessionStats.scanned || 0,
+        applied: sessionStats.applied || 0,
+        saved: sessionStats.saved || 0,
+        skipped: sessionStats.skipped || 0,
+        sessions: 1,
+        lastUpdated: Date.now()
+      };
+      await chrome.storage.local.set({ analyticsHistory: history });
+    }
+
+    const now = new Date();
+
+    if (period === 'daily') {
+      const rec = history[todayKey] || { scanned: 0, applied: 0, saved: 0, skipped: 0, sessions: 0 };
+      const todaySessions = sessions.filter(s => s.date === todayKey);
+      const sessCount = rec.sessions || todaySessions.length || (rec.scanned > 0 ? 1 : 0);
+
+      logsPeriodLabel.textContent = `Today (${now.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })})`;
+      logsSessionsCount.textContent = `${sessCount} ${sessCount === 1 ? 'Session' : 'Sessions'} Run`;
+
+      const scanned = rec.scanned || 0;
+      const applied = rec.applied || 0;
+      const saved = rec.saved || 0;
+      const skipped = rec.skipped || 0;
+
+      logsMetricScanned.textContent = scanned;
+      logsMetricApplied.textContent = applied;
+      logsMetricSaved.textContent = saved;
+      logsMetricSkipped.textContent = skipped;
+
+      const processed = applied + saved;
+      const targetJobs = (parseInt(ruleMaxJobs?.value, 10) || 25) * Math.max(1, sessCount);
+      logsProgressTitle.textContent = 'Session Progress';
+      logsProgressText.textContent = `${processed} / ${targetJobs} Jobs`;
+      const pct = Math.min(100, Math.round((processed / targetJobs) * 100));
+      logsProgressBarFill.style.width = `${pct}%`;
+
+      logsTableHeading.textContent = "Today's Session Activity";
+      if (todaySessions.length > 0) {
+        logsBreakdownContainer.innerHTML = todaySessions.map((s, idx) => {
+          const timeStr = s.startTime ? new Date(s.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recent';
+          const durMins = (s.startTime && s.endTime) ? Math.max(1, Math.round((s.endTime - s.startTime) / 60000)) : null;
+          return `
+            <div class="logs-session-item">
+              <div class="logs-session-title">
+                <span>Session #${todaySessions.length - idx} &bull; ${s.query || 'Auto-Apply'}</span>
+                <span class="logs-session-time">${timeStr}${durMins ? ` (${durMins}m)` : ''}</span>
+              </div>
+              <div style="font-size: 10.5px; color: var(--text-secondary);">${s.location || 'India'} &bull; Status: <strong>${s.status || 'completed'}</strong></div>
+              <div class="logs-session-tags">
+                <span class="tag-badge tag-scanned">Scanned: ${s.stats?.scanned || 0}</span>
+                <span class="tag-badge tag-applied">Applied: ${s.stats?.applied || 0}</span>
+                <span class="tag-badge tag-saved">Saved: ${s.stats?.saved || 0}</span>
+                <span class="tag-badge tag-skipped">Skipped: ${s.stats?.skipped || 0}</span>
+              </div>
+            </div>
+          `;
+        }).join('');
+      } else if (scanned > 0 || applied > 0 || saved > 0) {
+        logsBreakdownContainer.innerHTML = `
+          <div class="logs-session-item">
+            <div class="logs-session-title">
+              <span>Active Today's Summary</span>
+              <span class="logs-session-time">${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            </div>
+            <div style="font-size: 10.5px; color: var(--text-secondary);">Jobs Processed & Categorized</div>
+            <div class="logs-session-tags">
+              <span class="tag-badge tag-scanned">Scanned: ${scanned}</span>
+              <span class="tag-badge tag-applied">Applied: ${applied}</span>
+              <span class="tag-badge tag-saved">Saved: ${saved}</span>
+              <span class="tag-badge tag-skipped">Skipped: ${skipped}</span>
+            </div>
+          </div>
+        `;
+      } else {
+        logsBreakdownContainer.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 25px 10px; font-size: 11.5px;">No auto-apply sessions recorded today.<br>Click "Start Auto-Apply" to begin!</div>';
+      }
+    } else if (period === 'weekly') {
+      const days = [];
+      let scannedSum = 0, appliedSum = 0, savedSum = 0, skippedSum = 0, sessSum = 0;
+
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const k = getLocalDateKey(d);
+        const r = history[k] || { scanned: 0, applied: 0, saved: 0, skipped: 0, sessions: 0 };
+        days.push({
+          dateKey: k,
+          label: i === 0 ? 'Today' : (i === 1 ? 'Yesterday' : d.toLocaleDateString(undefined, { weekday: 'short' })),
+          dateStr: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+          scanned: r.scanned || 0,
+          applied: r.applied || 0,
+          saved: r.saved || 0,
+          skipped: r.skipped || 0,
+          sessions: r.sessions || (r.scanned > 0 ? 1 : 0)
+        });
+        scannedSum += (r.scanned || 0);
+        appliedSum += (r.applied || 0);
+        savedSum += (r.saved || 0);
+        skippedSum += (r.skipped || 0);
+        sessSum += (r.sessions || (r.scanned > 0 ? 1 : 0));
+      }
+
+      logsPeriodLabel.textContent = `Last 7 Days (${days[0].dateStr} - ${days[6].dateStr})`;
+      logsSessionsCount.textContent = `${sessSum} ${sessSum === 1 ? 'Session' : 'Sessions'} Total`;
+
+      logsMetricScanned.textContent = scannedSum;
+      logsMetricApplied.textContent = appliedSum;
+      logsMetricSaved.textContent = savedSum;
+      logsMetricSkipped.textContent = skippedSum;
+
+      const processed = appliedSum + savedSum;
+      const targetJobs = Math.max(25, sessSum * 25);
+      logsProgressTitle.textContent = 'Weekly Progress';
+      logsProgressText.textContent = `${processed} / ${targetJobs} Jobs`;
+      logsProgressBarFill.style.width = `${Math.min(100, Math.round((processed / targetJobs) * 100))}%`;
+
+      logsTableHeading.textContent = 'Daily Breakdown (Last 7 Days)';
+      logsBreakdownContainer.innerHTML = `
+        <table class="logs-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th class="num-col">Scanned</th>
+              <th class="num-col">Applied</th>
+              <th class="num-col">Saved</th>
+              <th class="num-col">Skipped</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${days.slice().reverse().map(d => `
+              <tr>
+                <td><strong>${d.label}</strong> <span style="font-size: 10px; color: var(--text-secondary);">(${d.dateStr})</span></td>
+                <td class="num-col">${d.scanned}</td>
+                <td class="num-col" style="color: ${d.applied > 0 ? 'var(--accent-success)' : 'inherit'};">${d.applied}</td>
+                <td class="num-col" style="color: ${d.saved > 0 ? 'var(--accent-warning)' : 'inherit'};">${d.saved}</td>
+                <td class="num-col">${d.skipped}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+          <tfoot>
+            <tr style="font-weight: 700; border-top: 1px solid var(--border-color);">
+              <td>Total</td>
+              <td class="num-col">${scannedSum}</td>
+              <td class="num-col" style="color: var(--accent-success);">${appliedSum}</td>
+              <td class="num-col" style="color: var(--accent-warning);">${savedSum}</td>
+              <td class="num-col">${skippedSum}</td>
+            </tr>
+          </tfoot>
+        </table>
+      `;
+    } else if (period === 'monthly') {
+      const year = now.getFullYear();
+      const month = now.getMonth();
+      const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+      const monthName = now.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+
+      let scannedSum = 0, appliedSum = 0, savedSum = 0, skippedSum = 0, sessSum = 0;
+      const monthEntries = [];
+
+      Object.keys(history).sort().forEach(k => {
+        if (k.startsWith(monthPrefix)) {
+          const r = history[k];
+          scannedSum += (r.scanned || 0);
+          appliedSum += (r.applied || 0);
+          savedSum += (r.saved || 0);
+          skippedSum += (r.skipped || 0);
+          sessSum += (r.sessions || (r.scanned > 0 ? 1 : 0));
+          monthEntries.push({
+            dateKey: k,
+            dateStr: new Date(k + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', weekday: 'short' }),
+            ...r
+          });
+        }
+      });
+
+      logsPeriodLabel.textContent = monthName;
+      logsSessionsCount.textContent = `${sessSum} ${sessSum === 1 ? 'Session' : 'Sessions'} in ${now.toLocaleDateString(undefined, { month: 'short' })}`;
+
+      logsMetricScanned.textContent = scannedSum;
+      logsMetricApplied.textContent = appliedSum;
+      logsMetricSaved.textContent = savedSum;
+      logsMetricSkipped.textContent = skippedSum;
+
+      const processed = appliedSum + savedSum;
+      const targetJobs = Math.max(50, sessSum * 25);
+      logsProgressTitle.textContent = 'Monthly Progress';
+      logsProgressText.textContent = `${processed} / ${targetJobs} Jobs`;
+      logsProgressBarFill.style.width = `${Math.min(100, Math.round((processed / targetJobs) * 100))}%`;
+
+      logsTableHeading.textContent = `Daily Breakdown (${now.toLocaleDateString(undefined, { month: 'short' })})`;
+
+      if (monthEntries.length === 0) {
+        logsBreakdownContainer.innerHTML = `<div style="text-align: center; color: var(--text-secondary); padding: 25px 10px; font-size: 11.5px;">No activity logged yet for ${monthName}.</div>`;
+      } else {
+        logsBreakdownContainer.innerHTML = `
+          <table class="logs-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th class="num-col">Scanned</th>
+                <th class="num-col">Applied</th>
+                <th class="num-col">Saved</th>
+                <th class="num-col">Skipped</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${monthEntries.slice().reverse().map(d => `
+                <tr>
+                  <td>${d.dateStr}</td>
+                  <td class="num-col">${d.scanned || 0}</td>
+                  <td class="num-col" style="color: ${(d.applied || 0) > 0 ? 'var(--accent-success)' : 'inherit'};">${d.applied || 0}</td>
+                  <td class="num-col" style="color: ${(d.saved || 0) > 0 ? 'var(--accent-warning)' : 'inherit'};">${d.saved || 0}</td>
+                  <td class="num-col">${d.skipped || 0}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+            <tfoot>
+              <tr style="font-weight: 700; border-top: 1px solid var(--border-color);">
+                <td>Total</td>
+                <td class="num-col">${scannedSum}</td>
+                <td class="num-col" style="color: var(--accent-success);">${appliedSum}</td>
+                <td class="num-col" style="color: var(--accent-warning);">${savedSum}</td>
+                <td class="num-col">${skippedSum}</td>
+              </tr>
+            </tfoot>
+          </table>
+        `;
+      }
+    } else if (period === 'yearly') {
+      const currentYear = now.getFullYear();
+      const yearPrefix = `${currentYear}-`;
+
+      let scannedSum = 0, appliedSum = 0, savedSum = 0, skippedSum = 0, sessSum = 0;
+      const monthBuckets = Array.from({ length: 12 }, (_, i) => {
+        const m = String(i + 1).padStart(2, '0');
+        const monthDate = new Date(currentYear, i, 1);
+        return {
+          monthKey: `${currentYear}-${m}`,
+          monthName: monthDate.toLocaleDateString(undefined, { month: 'short' }),
+          scanned: 0,
+          applied: 0,
+          saved: 0,
+          skipped: 0,
+          sessions: 0
+        };
+      });
+
+      Object.keys(history).forEach(k => {
+        if (k.startsWith(yearPrefix)) {
+          const r = history[k];
+          const mIdx = parseInt(k.substring(5, 7), 10) - 1;
+          if (mIdx >= 0 && mIdx < 12) {
+            monthBuckets[mIdx].scanned += (r.scanned || 0);
+            monthBuckets[mIdx].applied += (r.applied || 0);
+            monthBuckets[mIdx].saved += (r.saved || 0);
+            monthBuckets[mIdx].skipped += (r.skipped || 0);
+            monthBuckets[mIdx].sessions += (r.sessions || (r.scanned > 0 ? 1 : 0));
+          }
+          scannedSum += (r.scanned || 0);
+          appliedSum += (r.applied || 0);
+          savedSum += (r.saved || 0);
+          skippedSum += (r.skipped || 0);
+          sessSum += (r.sessions || (r.scanned > 0 ? 1 : 0));
+        }
+      });
+
+      logsPeriodLabel.textContent = `Year ${currentYear}`;
+      logsSessionsCount.textContent = `${sessSum} ${sessSum === 1 ? 'Session' : 'Sessions'} in ${currentYear}`;
+
+      logsMetricScanned.textContent = scannedSum;
+      logsMetricApplied.textContent = appliedSum;
+      logsMetricSaved.textContent = savedSum;
+      logsMetricSkipped.textContent = skippedSum;
+
+      const processed = appliedSum + savedSum;
+      const targetJobs = Math.max(100, sessSum * 25);
+      logsProgressTitle.textContent = 'Yearly Progress';
+      logsProgressText.textContent = `${processed} / ${targetJobs} Jobs`;
+      logsProgressBarFill.style.width = `${Math.min(100, Math.round((processed / targetJobs) * 100))}%`;
+
+      logsTableHeading.textContent = `Monthly Summary (${currentYear})`;
+      logsBreakdownContainer.innerHTML = `
+        <table class="logs-table">
+          <thead>
+            <tr>
+              <th>Month</th>
+              <th class="num-col">Scanned</th>
+              <th class="num-col">Applied</th>
+              <th class="num-col">Saved</th>
+              <th class="num-col">Skipped</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${monthBuckets.filter(m => m.scanned > 0 || m.applied > 0 || m.saved > 0 || m.skipped > 0).length > 0
+              ? monthBuckets.filter(m => m.scanned > 0 || m.applied > 0 || m.saved > 0 || m.skipped > 0).map(m => `
+                <tr>
+                  <td><strong>${m.monthName}</strong></td>
+                  <td class="num-col">${m.scanned}</td>
+                  <td class="num-col" style="color: ${m.applied > 0 ? 'var(--accent-success)' : 'inherit'};">${m.applied}</td>
+                  <td class="num-col" style="color: ${m.saved > 0 ? 'var(--accent-warning)' : 'inherit'};">${m.saved}</td>
+                  <td class="num-col">${m.skipped}</td>
+                </tr>
+              `).join('')
+              : monthBuckets.slice(0, now.getMonth() + 1).map(m => `
+                <tr>
+                  <td><strong>${m.monthName}</strong></td>
+                  <td class="num-col">${m.scanned}</td>
+                  <td class="num-col">${m.applied}</td>
+                  <td class="num-col">${m.saved}</td>
+                  <td class="num-col">${m.skipped}</td>
+                </tr>
+              `).join('')}
+          </tbody>
+          <tfoot>
+            <tr style="font-weight: 700; border-top: 1px solid var(--border-color);">
+              <td>Total</td>
+              <td class="num-col">${scannedSum}</td>
+              <td class="num-col" style="color: var(--accent-success);">${appliedSum}</td>
+              <td class="num-col" style="color: var(--accent-warning);">${savedSum}</td>
+              <td class="num-col">${skippedSum}</td>
+            </tr>
+          </tfoot>
+        </table>
+      `;
+    }
+  }
+
+  btnExportLogs.addEventListener('click', async () => {
+    const data = await chrome.storage.local.get(['analyticsHistory', 'sessionHistory']);
+    const history = data.analyticsHistory || {};
+    const sessions = data.sessionHistory || [];
+
+    if (Object.keys(history).length === 0 && sessions.length === 0) {
+      alert('No analytics history to export yet!');
+      return;
+    }
+
+    let csv = '=== DAILY ANALYTICS SUMMARY ===\n';
+    csv += 'Date,Scanned,Applied,Saved,Skipped,Sessions,LastUpdated\n';
+    const dates = Object.keys(history).sort();
+    dates.forEach(d => {
+      const r = history[d];
+      csv += `"${d}",${r.scanned || 0},${r.applied || 0},${r.saved || 0},${r.skipped || 0},${r.sessions || 0},"${r.lastUpdated ? new Date(r.lastUpdated).toISOString() : ''}"\n`;
+    });
+
+    if (sessions.length > 0) {
+      csv += '\n=== SESSION RUN DETAILS ===\n';
+      csv += 'SessionID,Date,StartTime,EndTime,Query,Location,Scanned,Applied,Saved,Skipped,Status\n';
+      sessions.forEach(s => {
+        const escape = (val) => `"${String(val || '').replace(/"/g, '""')}"`;
+        const start = s.startTime ? new Date(s.startTime).toISOString() : '';
+        const end = s.endTime ? new Date(s.endTime).toISOString() : '';
+        csv += `${escape(s.id)},${escape(s.date)},${escape(start)},${escape(end)},${escape(s.query)},${escape(s.location)},${s.stats?.scanned || 0},${s.stats?.applied || 0},${s.stats?.saved || 0},${s.stats?.skipped || 0},${escape(s.status)}\n`;
+      });
+    }
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `indeed_auto_applier_analytics_${getLocalDateKey()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  btnClearHistory.addEventListener('click', () => {
+    if (confirm('Are you sure you want to reset all historical logs and analytics? This cannot be undone.')) {
+      chrome.runtime.sendMessage({ action: 'CLEAR_ANALYTICS_HISTORY' }, () => {
+        renderAnalytics(currentLogsPeriod);
+      });
+    }
+  });
+
   btnStart.addEventListener('click', async () => {
     const customSettings = {
       targetJobQuery: ruleQuery.value.trim() || 'Data Analyst',
@@ -346,6 +774,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       progressText.textContent = `${processed} / ${maxJobs} Jobs`;
       const pct = Math.min(100, Math.round((processed / maxJobs) * 100));
       progressBarFill.style.width = `${pct}%`;
+
+      renderAnalytics(currentLogsPeriod);
+    }
+    if (request.action === 'ANALYTICS_UPDATED') {
+      renderAnalytics(currentLogsPeriod);
     }
   });
 
@@ -356,6 +789,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       if (changes.savedJobs) {
         renderSavedJobs(changes.savedJobs.newValue || []);
+      }
+      if (changes.analyticsHistory || changes.sessionHistory) {
+        renderAnalytics(currentLogsPeriod);
       }
     }
   });

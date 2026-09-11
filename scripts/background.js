@@ -23,10 +23,18 @@ async function appendSessionLog(message, type = 'info') {
   }
 }
 
-// Update session statistics
+// Helper to get local date key formatted as YYYY-MM-DD
+function getLocalDateKey(d = new Date()) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// Update session statistics and persistent daily analytics
 async function updateSessionStats(delta) {
   try {
-    const data = await chrome.storage.local.get(['autoApplySession']);
+    const data = await chrome.storage.local.get(['autoApplySession', 'analyticsHistory']);
     const session = data.autoApplySession || { isRunning: false, stats: { scanned: 0, applied: 0, saved: 0, skipped: 0 } };
     
     if (delta.scanned) session.stats.scanned = (session.stats.scanned || 0) + delta.scanned;
@@ -34,8 +42,32 @@ async function updateSessionStats(delta) {
     if (delta.saved) session.stats.saved = (session.stats.saved || 0) + delta.saved;
     if (delta.skipped) session.stats.skipped = (session.stats.skipped || 0) + delta.skipped;
 
-    await chrome.storage.local.set({ autoApplySession: session });
+    const today = getLocalDateKey();
+    const history = data.analyticsHistory || {};
+    if (!history[today]) {
+      history[today] = {
+        date: today,
+        scanned: 0,
+        applied: 0,
+        saved: 0,
+        skipped: 0,
+        sessions: session.isRunning ? 1 : 0,
+        lastUpdated: Date.now()
+      };
+    }
+    if (delta.scanned) history[today].scanned = (history[today].scanned || 0) + delta.scanned;
+    if (delta.applied) history[today].applied = (history[today].applied || 0) + delta.applied;
+    if (delta.saved) history[today].saved = (history[today].saved || 0) + delta.saved;
+    if (delta.skipped) history[today].skipped = (history[today].skipped || 0) + delta.skipped;
+    history[today].lastUpdated = Date.now();
+
+    await chrome.storage.local.set({ 
+      autoApplySession: session,
+      analyticsHistory: history
+    });
+
     chrome.runtime.sendMessage({ action: 'STATS_UPDATED', stats: session.stats }).catch(() => {});
+    chrome.runtime.sendMessage({ action: 'ANALYTICS_UPDATED', history }).catch(() => {});
   } catch (err) {
     console.error('[Background] Failed to update stats:', err);
   }
@@ -80,6 +112,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     handleJobApplied(request.job)
       .then(res => sendResponse(res))
       .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === 'CLEAR_ANALYTICS_HISTORY') {
+    chrome.storage.local.set({ analyticsHistory: {}, sessionHistory: [] }, () => {
+      chrome.runtime.sendMessage({ action: 'ANALYTICS_UPDATED', history: {} }).catch(() => {});
+      sendResponse({ success: true });
+    });
     return true;
   }
 
@@ -160,7 +200,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // Start auto apply handler
 async function handleStartAutoApply(customSettings) {
-  const data = await chrome.storage.local.get(['userProfile', 'autoApplierSettings']);
+  const data = await chrome.storage.local.get(['userProfile', 'autoApplierSettings', 'analyticsHistory']);
   const profile = data.userProfile || {};
   const settings = Object.assign({}, profile.autoApplierSettings || {}, data.autoApplierSettings || {}, customSettings || {});
 
@@ -170,7 +210,9 @@ async function handleStartAutoApply(customSettings) {
   // Date posted filter: 'fromage=1' for Last 24 hours, sorted by date (newest first)
   let searchUrl = `https://in.indeed.com/jobs?q=${query}&l=${loc}&fromage=1&sort=date`;
 
+  const sessionId = 'sess_' + Date.now();
   const session = {
+    sessionId: sessionId,
     isRunning: true,
     startTime: Date.now(),
     settings: settings,
@@ -178,9 +220,26 @@ async function handleStartAutoApply(customSettings) {
     processedJks: []
   };
 
+  const today = getLocalDateKey();
+  const history = data.analyticsHistory || {};
+  if (!history[today]) {
+    history[today] = {
+      date: today,
+      scanned: 0,
+      applied: 0,
+      saved: 0,
+      skipped: 0,
+      sessions: 0,
+      lastUpdated: Date.now()
+    };
+  }
+  history[today].sessions = (history[today].sessions || 0) + 1;
+  history[today].lastUpdated = Date.now();
+
   await chrome.storage.local.set({
     autoApplySession: session,
-    sessionLogs: []
+    sessionLogs: [],
+    analyticsHistory: history
   });
 
   await appendSessionLog(`🚀 Auto-Apply session started for "${settings.targetJobQuery || 'MIS Analyst'}" in "${settings.targetLocation || 'Bangalore'}" (Filter: Last 24 Hours)`, 'info');
@@ -205,11 +264,29 @@ async function handleStartAutoApply(customSettings) {
 
 // Stop auto apply handler
 async function handleStopAutoApply() {
-  const data = await chrome.storage.local.get(['autoApplySession']);
+  const data = await chrome.storage.local.get(['autoApplySession', 'sessionHistory']);
   const session = data.autoApplySession || {};
   session.isRunning = false;
 
-  await chrome.storage.local.set({ autoApplySession: session });
+  if (session.startTime) {
+    const sessionHistory = data.sessionHistory || [];
+    sessionHistory.unshift({
+      id: session.sessionId || ('sess_' + session.startTime),
+      date: getLocalDateKey(new Date(session.startTime)),
+      startTime: session.startTime,
+      endTime: Date.now(),
+      query: session.settings?.targetJobQuery || 'Job Search',
+      location: session.settings?.targetLocation || '',
+      maxJobs: session.settings?.maxJobsPerSession || 25,
+      stats: { ...(session.stats || { scanned: 0, applied: 0, saved: 0, skipped: 0 }) },
+      status: 'stopped'
+    });
+    if (sessionHistory.length > 100) sessionHistory.pop();
+    await chrome.storage.local.set({ autoApplySession: session, sessionHistory });
+  } else {
+    await chrome.storage.local.set({ autoApplySession: session });
+  }
+
   await appendSessionLog('⏹ Auto-Apply session stopped by user.', 'warning');
 
   const tabs = await chrome.tabs.query({ url: ['https://*.indeed.com/*', 'https://*.indeedapply.com/*'] });
@@ -254,10 +331,33 @@ async function handleJobApplied(job) {
 
 // Session complete handler
 async function handleSessionCompleted(summary = {}) {
-  const data = await chrome.storage.local.get(['autoApplySession']);
+  const data = await chrome.storage.local.get(['autoApplySession', 'sessionHistory']);
   const session = data.autoApplySession || {};
   session.isRunning = false;
-  await chrome.storage.local.set({ autoApplySession: session });
+
+  if (session.startTime) {
+    const sessionHistory = data.sessionHistory || [];
+    sessionHistory.unshift({
+      id: session.sessionId || ('sess_' + session.startTime),
+      date: getLocalDateKey(new Date(session.startTime)),
+      startTime: session.startTime,
+      endTime: Date.now(),
+      query: session.settings?.targetJobQuery || 'Job Search',
+      location: session.settings?.targetLocation || '',
+      maxJobs: session.settings?.maxJobsPerSession || 25,
+      stats: {
+        scanned: session.stats?.scanned || 0,
+        applied: summary.applied !== undefined ? summary.applied : (session.stats?.applied || 0),
+        saved: summary.saved !== undefined ? summary.saved : (session.stats?.saved || 0),
+        skipped: summary.skipped !== undefined ? summary.skipped : (session.stats?.skipped || 0)
+      },
+      status: 'completed'
+    });
+    if (sessionHistory.length > 100) sessionHistory.pop();
+    await chrome.storage.local.set({ autoApplySession: session, sessionHistory });
+  } else {
+    await chrome.storage.local.set({ autoApplySession: session });
+  }
 
   const msg = `🎉 Session completed! Applied: ${summary.applied || 0}, Saved: ${summary.saved || 0}, Skipped: ${summary.skipped || 0}`;
   await appendSessionLog(msg, 'success');
@@ -306,7 +406,9 @@ chrome.runtime.onInstalled.addListener(() => {
             savedJobs: [],
             appliedJobs: [],
             sessionLogs: [],
-            autoApplySession: { isRunning: false, stats: { scanned: 0, applied: 0, saved: 0, skipped: 0 } }
+            autoApplySession: { isRunning: false, stats: { scanned: 0, applied: 0, saved: 0, skipped: 0 } },
+            analyticsHistory: {},
+            sessionHistory: []
           }, () => {
             console.log('[Auto-Applier Background] Default profile initialized.');
           });
