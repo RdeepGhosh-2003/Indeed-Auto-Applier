@@ -8,6 +8,7 @@ This document serves as the permanent chronological reference for all updates, f
 
 | Version | Date & Timestamp | Type | Key Highlights |
 |---|---|---|---|
+| **`v1.1.1`** | 2026-09-11 13:00 IST | **UI & Spacing Optimization** | Eliminated empty height void in Filter Drop-off Breakdown, enabled auto-sizing on logs history table, shortened Saved tab label to prevent tab bar crowding, reconciled drop-off count with historical period skips. |
 | **`v1.1.0`** | 2026-09-11 12:45 IST | **Major Feature Suite** | Screening Q&A Bank Manager, Applied Jobs Tracker, Filter Drop-Off Analytics, Easy Apply Only Mode, Company Blacklist, Audio Chimes, Multi-Role Search Queue. |
 | **`v1.0.8`** | 2026-09-11 11:56 IST | **UI / Spacing Fix** | Equalized navigation tab spacing across 500px popup body; added weekday names to Today/Yesterday in weekly log tables (`Today, Fri`, `Yesterday, Thu`). |
 | **`v1.0.7`** | 2026-09-11 11:45 IST | **Feature Release** | Added dedicated `📊 Logs` tab with Daily, Weekly, Monthly, and Yearly rollups for Scanned, Applied, Saved, and Skipped metrics, plus CSV export. |
@@ -29,6 +30,17 @@ This document serves as the permanent chronological reference for all updates, f
 ---
 
 ## 🔍 Detailed Version Records
+
+### `v1.1.1` — Layout Spacing & Drop-off Reconciliation
+- **Date**: September 11, 2026 (13:00 IST)
+- **Commits**: `fix(ui): eliminate drop-off height void, auto-size history table, refine nav tab spacing, and reconcile drop-off analytics`
+- **Files Modified**: `popup/popup.html`, `popup/popup.css`, `popup/popup.js`, `manifest.json`, `CHANGELOG.md`, `walkthrough.md`.
+- **What Was Added / Updated:**
+  1. **🎯 Eliminated Empty Void in Filter Drop-off Card**: Separated `.logs-dropoff-card` from `.logs-details-card` with dynamic `height: auto; max-height: 165px;`. When empty or showing few categories, it now takes only ~45–70px instead of forcing a fixed 235px void.
+  2. **📐 Auto-Sizing Historical Activity Breakdown Card**: Changed `.logs-details-card` from fixed `height: 235px` to responsive `min-height: 110px; max-height: 215px; height: auto;`, preventing empty dark blocks beneath monthly tables while keeping long tables scrollable.
+  3. **📋 Condensed Saved Tab Header & Equal Nav Margins**: Changed Tab 3 header from `📋 Saved & Applied [40 / 0]` to `📋 Saved [40]` (with subview tabs handling granular counts), preventing the tab bar from overflowing or pushing other tabs against screen edges.
+  4. **🔄 Skip Metric Reconciliation**: Updated `renderDropoffAnalytics(reasons, totalPeriodSkipped)` across Daily, Weekly, Monthly, and Yearly views. Any skips from legacy sessions prior to fine-grained categorization are cleanly captured as `⏳ Prior / General Filters`, ensuring the drop-off count matches the summary table.
+  5. **🎨 Compact Padding & Breathing Room**: Reduced vertical paddings on `.tab-content-area` (10px 12px), `.tab-pane` gap (8px), `.metric-card` (8px 6px), and `.period-selector-card` (8px 10px) so the entire Logs dashboard (selector, progress, 4 metric cards, drop-off breakdown, and table) fits gracefully with minimal scroll.
 
 ### `v1.1.0` — Major Productivity & Intelligence Suite
 - **Date**: September 11, 2026 (12:45 IST)

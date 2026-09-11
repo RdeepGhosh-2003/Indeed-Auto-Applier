@@ -218,7 +218,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const data = await chrome.storage.local.get(['savedJobs', 'appliedJobs']);
     const savedLen = (data.savedJobs || []).length;
     const appliedLen = (data.appliedJobs || []).length;
-    if (savedCountBadge) savedCountBadge.textContent = `${savedLen} / ${appliedLen}`;
+    if (savedCountBadge) savedCountBadge.textContent = savedLen;
     if (savedTabCount) savedTabCount.textContent = savedLen;
     if (appliedTabCount) appliedTabCount.textContent = appliedLen;
   }
@@ -526,7 +526,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     return `${year}-${month}-${day}`;
   }
 
-  function renderDropoffAnalytics(reasons = {}) {
+  function renderDropoffAnalytics(reasons = {}, totalPeriodSkipped = 0) {
     const logsDropoffContainer = document.getElementById('logs-dropoff-container');
     const dropoffTotalSkipped = document.getElementById('dropoff-total-skipped');
     if (!logsDropoffContainer) return;
@@ -541,17 +541,29 @@ document.addEventListener('DOMContentLoaded', async () => {
       { key: 'unrecognized', label: '❓ Unrecognized / Expired', class: 'fill-other' }
     ];
 
-    let total = 0;
+    let categorizedTotal = 0;
     categories.forEach(c => {
       c.count = reasons[c.key] || 0;
-      total += c.count;
+      categorizedTotal += c.count;
     });
 
-    if (dropoffTotalSkipped) {
-      dropoffTotalSkipped.textContent = `${total} Skipped`;
+    const displayTotal = Math.max(categorizedTotal, totalPeriodSkipped);
+
+    if (totalPeriodSkipped > categorizedTotal) {
+      const uncat = totalPeriodSkipped - categorizedTotal;
+      categories.push({
+        key: 'other_filters',
+        label: '⏳ Prior / General Filters',
+        count: uncat,
+        class: 'fill-other'
+      });
     }
 
-    if (total === 0) {
+    if (dropoffTotalSkipped) {
+      dropoffTotalSkipped.textContent = `${displayTotal} Skipped`;
+    }
+
+    if (displayTotal === 0) {
       logsDropoffContainer.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 8px; font-size: 11px;">No skipped jobs recorded for this period.</div>';
       return;
     }
@@ -559,7 +571,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     logsDropoffContainer.innerHTML = categories
       .filter(c => c.count > 0)
       .map(c => {
-        const pct = Math.round((c.count / total) * 100);
+        const pct = Math.round((c.count / displayTotal) * 100);
         return `
           <div class="dropoff-row">
             <div class="dropoff-header">
@@ -668,7 +680,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       const dailyReasons = Object.assign({}, autoApplySession.skipReasons || {}, rec.skipReasons || {});
-      renderDropoffAnalytics(dailyReasons);
+      renderDropoffAnalytics(dailyReasons, skipped);
     } else if (period === 'weekly') {
       const days = [];
       let scannedSum = 0, appliedSum = 0, savedSum = 0, skippedSum = 0, sessSum = 0;
@@ -761,7 +773,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           });
         }
       });
-      renderDropoffAnalytics(weeklyReasons);
+      renderDropoffAnalytics(weeklyReasons, skippedSum);
     } else if (period === 'monthly') {
       const year = now.getFullYear();
       const month = now.getMonth();
@@ -849,7 +861,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           });
         }
       });
-      renderDropoffAnalytics(monthlyReasons);
+      renderDropoffAnalytics(monthlyReasons, skippedSum);
     } else if (period === 'yearly') {
       const currentYear = now.getFullYear();
       const yearPrefix = `${currentYear}-`;
@@ -955,7 +967,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           });
         }
       });
-      renderDropoffAnalytics(yearlyReasons);
+      renderDropoffAnalytics(yearlyReasons, skippedSum);
     }
   }
 
