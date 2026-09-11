@@ -8,6 +8,7 @@ This document serves as the permanent chronological reference for all updates, f
 
 | Version | Date & Timestamp | Type | Key Highlights |
 |---|---|---|---|
+| **`v1.1.3`** | 2026-09-11 16:35 IST | **Location Matcher Upgrade** | Enabled countrywide matching for `targetLocation: "India"` so Indian cities (Bengaluru, Pune, Mumbai, Delhi, etc.) aren't falsely skipped as "Outside Target Location"; added Delhi/NCR/Gurgaon/Noida alias resolution. |
 | **`v1.1.2`** | 2026-09-11 15:15 IST | **Core Accounting & Opportunity Protection** | Auto-saves incomplete Indeed applications to Saved Jobs with reason `⚠️ Incomplete: [Reason]`; ensures `Scanned = Applied + Saved + Skipped` is always 100% mathematically balanced; styles manual-review jobs with prominent coral badge in Saved tab. |
 | **`v1.1.1`** | 2026-09-11 13:00 IST | **UI & Spacing Optimization** | Eliminated empty height void in Filter Drop-off Breakdown, enabled auto-sizing on logs history table, shortened Saved tab label to prevent tab bar crowding, reconciled drop-off count with historical period skips. |
 | **`v1.1.0`** | 2026-09-11 12:45 IST | **Major Feature Suite** | Screening Q&A Bank Manager, Applied Jobs Tracker, Filter Drop-Off Analytics, Easy Apply Only Mode, Company Blacklist, Audio Chimes, Multi-Role Search Queue. |
@@ -31,6 +32,14 @@ This document serves as the permanent chronological reference for all updates, f
 ---
 
 ## 🔍 Detailed Version Records
+
+### `v1.1.3` — Countrywide India & City Alias Location Matching
+- **Date**: September 11, 2026 (16:35 IST)
+- **Commits**: `fix(matcher): enable countrywide India matching and Delhi/NCR city aliases in strict location filter`
+- **Files Modified**: `scripts/applier.js`, `manifest.json`, `CHANGELOG.md`, `walkthrough.md`.
+- **What Was Added / Updated:**
+  1. **🇮🇳 Countrywide India Search Matching**: Resolved an issue where searching with `targetLocation: "India"` caused on-site jobs in Bengaluru, Pune, Mumbai, etc., to be skipped as "Outside Target Location" (accounting for 45% of total skips in earlier runs) because Indeed India cards omit the explicit country name "India". Setting location to "India" or "All India" now treats all valid Indian cities on `in.indeed.com` as matches.
+  2. **🏙️ Delhi NCR Regional Aliases**: Added bidirectional alias resolution between `Delhi`, `NCR`, `Gurgaon`, `Gurugram`, and `Noida` so jobs in the National Capital Region match regardless of the exact suburb named on the job posting.
 
 ### `v1.1.2` — Math Balancing & Incomplete Application Auto-Save
 - **Date**: September 11, 2026 (15:15 IST)

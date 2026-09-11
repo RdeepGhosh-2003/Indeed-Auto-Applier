@@ -536,12 +536,20 @@
       
       let isCityMatch = targetTokens.length === 0;
       if (!isCityMatch) {
-        isCityMatch = targetTokens.some(t => {
-          if (t === 'bangalore' || t === 'bengaluru') {
-            return locLower.includes('bangalore') || locLower.includes('bengaluru');
-          }
-          return locLower.includes(t);
-        });
+        // If target location is India / countrywide, all jobs on in.indeed.com are within target location!
+        if (targetTokens.includes('india') || rawTarget === 'india' || rawTarget === 'all india') {
+          isCityMatch = true;
+        } else {
+          isCityMatch = targetTokens.some(t => {
+            if (t === 'bangalore' || t === 'bengaluru') {
+              return locLower.includes('bangalore') || locLower.includes('bengaluru');
+            }
+            if (t === 'delhi' || t === 'ncr' || t === 'gurgaon' || t === 'gurugram' || t === 'noida') {
+              return locLower.includes('delhi') || locLower.includes('ncr') || locLower.includes('gurgaon') || locLower.includes('gurugram') || locLower.includes('noida');
+            }
+            return locLower.includes(t);
+          });
+        }
       }
 
       if (!isRemote && !isCityMatch) {
