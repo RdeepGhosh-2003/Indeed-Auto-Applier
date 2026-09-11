@@ -318,7 +318,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       const todaySessions = sessions.filter(s => s.date === todayKey);
       const sessCount = rec.sessions || todaySessions.length || (rec.scanned > 0 ? 1 : 0);
 
-      logsPeriodLabel.textContent = `Today (${now.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })})`;
+      const todayDayName = now.toLocaleDateString(undefined, { weekday: 'short' });
+      logsPeriodLabel.textContent = `Today, ${todayDayName} (${now.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })})`;
       logsSessionsCount.textContent = `${sessCount} ${sessCount === 1 ? 'Session' : 'Sessions'} Run`;
 
       const scanned = rec.scanned || 0;
@@ -387,9 +388,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         d.setDate(d.getDate() - i);
         const k = getLocalDateKey(d);
         const r = history[k] || { scanned: 0, applied: 0, saved: 0, skipped: 0, sessions: 0 };
+        const dayOfWeek = d.toLocaleDateString(undefined, { weekday: 'short' });
+        let dayLabel = dayOfWeek;
+        if (i === 0) {
+          dayLabel = `Today, ${dayOfWeek}`;
+        } else if (i === 1) {
+          dayLabel = `Yesterday, ${dayOfWeek}`;
+        }
+
         days.push({
           dateKey: k,
-          label: i === 0 ? 'Today' : (i === 1 ? 'Yesterday' : d.toLocaleDateString(undefined, { weekday: 'short' })),
+          label: dayLabel,
           dateStr: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
           scanned: r.scanned || 0,
           applied: r.applied || 0,
